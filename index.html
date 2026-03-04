@@ -20,8 +20,11 @@
             <sidebar 
                 :current-dashboard="currentDashboard"
                 :is-open="sidebarOpen"
+                :user-role="userRole"
+                :unified-team-sk="unifiedTeamSk"
                 @change-dashboard="changeDashboard"
-                @close-sidebar="sidebarOpen = false">
+                @close-sidebar="sidebarOpen = false"
+                @logout="logout">
             </sidebar>
 
             <main class="main-content">
@@ -33,14 +36,23 @@
                         <h1>{{ dashboardTitle }}</h1>
                     </div>
                     <div class="user-menu">
+                        <span class="user-badge" v-if="isAdmin" style="background: #10b981; color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; margin-right: 0.5rem;">
+                            <i class="fas fa-crown"></i> ADMIN
+                        </span>
+                        <span class="user-badge" v-else style="background: #3b82f6; color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; margin-right: 0.5rem;">
+                            <i class="fas fa-store"></i> {{ unifiedTeamSk }}
+                        </span>
                         <span class="date">{{ currentDate }}</span>
+                        <button @click="logout" style="margin-left: 1rem; background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1rem;" title="Cerrar sesión">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
                     </div>
                 </header>
 
                 <!-- FILTROS DASHBOARD PRINCIPAL (Daily Sales) -->
                 <div v-if="currentDashboard === 'daily'" class="date-filter-bar">
                     <div class="filters-left">
-                        <div class="restaurant-filter">
+                        <div v-if="isAdmin" class="restaurant-filter">
                             <label for="restaurant-select">
                                 <i class="fas fa-store"></i>
                             </label>
@@ -50,6 +62,11 @@
                                     {{ rest.name }}
                                 </option>
                             </select>
+                        </div>
+                        
+                        <div v-else class="restaurant-info" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: #eff6ff; border-radius: 8px; color: #1e40af; font-weight: 600;">
+                            <i class="fas fa-store"></i>
+                            <span>{{ userRestaurantName || ('Restaurante ' + unifiedTeamSk) }}</span>
                         </div>
 
                         <div class="separator"></div>
@@ -74,15 +91,11 @@
                             class="date-input"
                             :max="maxDate"
                         >
-                        <div class="reference-date-badge" v-if="datePreset === 'custom'">
-                            <i class="fas fa-crosshairs"></i>
-                            <span>{{ formatDisplayDate(selectedDate) }}</span>
-                        </div>
                     </div>
                 </div>
 
-                <!-- FILTROS TABLA RESTAURANTES (Diseño Dropdown Profesional) -->
-                <div v-if="currentDashboard === 'restaurants'" class="table-filters-panel">
+                <!-- FILTROS TABLA RESTAURANTES (solo visible para admin) -->
+                <div v-if="currentDashboard === 'restaurants' && isAdmin" class="table-filters-panel">
                     <div class="filter-section">
                         <h4 class="filter-title">
                             <i class="fas fa-filter"></i>
@@ -144,6 +157,17 @@
                     </div>
                 </div>
 
+                <!-- Mensaje para usuarios de restaurante en vista de tabla -->
+                <div v-if="currentDashboard === 'restaurants' && !isAdmin" class="table-filters-panel" style="background: #fef3c7; border-left: 4px solid #f59e0b;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; color: #92400e;">
+                        <i class="fas fa-info-circle" style="font-size: 1.25rem;"></i>
+                        <div>
+                            <strong>Vista limitada</strong>
+                            <p style="margin: 0; font-size: 0.875rem;">Como usuario de restaurante, solo puedes ver los datos de tu establecimiento.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- CONTENIDO PRINCIPAL -->
                 <dashboard-grid 
                     :kpis="kpis" 
@@ -164,7 +188,9 @@
     <script src="API.js"></script>
     
     <script>
-    const app = Vue.createApp({
+    const { createApp } = Vue;
+
+    createApp({
         components: {
             'sidebar': Sidebar,
             'dashboard-grid': DashboardGrid
@@ -174,10 +200,20 @@
             const todayStr = today.toISOString().split('T')[0];
             const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
             
+            if (!apiService.isAuthenticated()) {
+                window.location.href = '/login.html';
+                return {};
+            }
+            
             return {
                 currentDashboard: 'daily',
                 sidebarOpen: true,
                 loading: false,
+                
+                userRole: apiService.getRole(),
+                unifiedTeamSk: apiService.getUnifiedTeamSk(),
+                username: apiService.getUsername(),
+                userRestaurantName: '',
                 
                 kpis: [],
                 secondaryMetrics: [],
@@ -186,11 +222,11 @@
                 selectedDate: todayStr,
                 datePreset: 'today',
                 restaurants: [],
-                selectedRestaurant: 'all',
+                selectedRestaurant: apiService.isAdmin() ? 'all' : apiService.getUnifiedTeamSk(),
                 
                 tableStartDate: startOfYear,
                 tableEndDate: todayStr,
-                tableRestaurants: ['all'],
+                tableRestaurants: apiService.isAdmin() ? ['all'] : [apiService.getUnifiedTeamSk()],
                 showRestaurantDropdown: false,
                 
                 tableData: [],
@@ -224,6 +260,10 @@
                 return titles[this.currentDashboard] || 'Dashboard';
             },
             
+            isAdmin() {
+                return apiService.isAdmin();
+            },
+            
             maxDate() {
                 return new Date().toISOString().split('T')[0];
             },
@@ -254,8 +294,19 @@
             }
         },
         mounted() {
+            if (!apiService.isAuthenticated()) {
+                window.location.href = '/login.html';
+                return;
+            }
+            
+            if (!apiService.isAdmin()) {
+                this.selectedRestaurant = apiService.getUnifiedTeamSk();
+                this.tableRestaurants = [apiService.getUnifiedTeamSk()];
+            }
+            
             this.loadRestaurants();
             this.loadDashboardData();
+            
             if (window.innerWidth <= 768) {
                 this.sidebarOpen = false;
             }
@@ -271,7 +322,15 @@
                 this.sidebarOpen = !this.sidebarOpen;
             },
             
+            logout() {
+                apiService.logout();
+            },
+            
             async changeDashboard(dashboardId) {
+                if (!this.isAdmin && dashboardId === 'restaurants') {
+                    alert('Solo los administradores pueden ver el detalle de todos los restaurantes.');
+                    return;
+                }
                 this.currentDashboard = dashboardId;
                 await this.loadDashboardData();
             },
@@ -287,6 +346,15 @@
                     const response = await apiService.getRestaurants();
                     if (response.success) {
                         this.restaurants = response.data || [];
+                        
+                        if (!this.isAdmin && this.unifiedTeamSk) {
+                            const userRest = this.restaurants.find(r => 
+                                r.id === this.unifiedTeamSk
+                            );
+                            if (userRest) {
+                                this.userRestaurantName = userRest.name;
+                            }
+                        }
                     }
                 } catch (error) {
                     console.error('Error cargando restaurantes:', error);
@@ -294,6 +362,11 @@
             },
             
             async changeRestaurant() {
+                if (!this.isAdmin && this.selectedRestaurant !== this.unifiedTeamSk) {
+                    this.selectedRestaurant = this.unifiedTeamSk;
+                    alert('Solo puedes ver tu restaurante asignado');
+                    return;
+                }
                 await this.loadDashboardData();
             },
             
@@ -322,6 +395,9 @@
             },
             
             async applyTableFilter() {
+                if (!this.isAdmin) {
+                    this.tableRestaurants = [this.unifiedTeamSk];
+                }
                 if (this.currentDashboard === 'restaurants') {
                     await this.loadDashboardData();
                 }
@@ -355,10 +431,12 @@
                 this.loading = true;
                 try {
                     if (this.currentDashboard === 'restaurants') {
+                        const restaurants = this.isAdmin ? this.tableRestaurants : [this.unifiedTeamSk];
+                        
                         const params = {
                             start_date: this.tableStartDate,
                             end_date: this.tableEndDate,
-                            restaurants: this.tableRestaurants
+                            restaurants: restaurants
                         };
                         
                         const response = await apiService.getDashboardData('restaurants', params);

@@ -1,6 +1,6 @@
 const Sidebar = {
-    props: ['currentDashboard', 'isOpen'],
-    emits: ['change-dashboard', 'close-sidebar'],
+    props: ['currentDashboard', 'isOpen', 'userRole', 'unifiedTeamSk'],
+    emits: ['change-dashboard', 'close-sidebar', 'logout'],
     template: `
         <aside class="sidebar" :class="{ 'open': isOpen }">
             <div class="sidebar-header">
@@ -16,7 +16,7 @@ const Sidebar = {
             <nav>
                 <ul class="nav-menu">
                     <li class="nav-item" 
-                        v-for="dash in dashboards" 
+                        v-for="dash in availableDashboards" 
                         :key="dash.id"
                         @click="selectDashboard(dash.id)">
                         <button class="nav-link" :class="{ active: currentDashboard === dash.id }">
@@ -28,34 +28,55 @@ const Sidebar = {
             </nav>
             
             <div class="sidebar-footer">
-                <div class="user-info">
-                    <div class="user-avatar">BZ</div>
-                    <span>Mi Cuenta</span>
+                <div class="user-info" @click="logout" style="cursor: pointer;">
+                    <div class="user-avatar">{{ userInitials }}</div>
+                    <div style="display: flex; flex-direction: column;">
+                        <span style="font-weight: 600;">{{ displayName }}</span>
+                        <small style="color: var(--text-secondary); font-size: 0.75rem;">{{ userRole === 'admin' ? 'Administrador' : 'Restaurante' }}</small>
+                    </div>
+                    <i class="fas fa-sign-out-alt" style="margin-left: auto; color: #ef4444;"></i>
                 </div>
             </div>
         </aside>
     `,
+    computed: {
+        availableDashboards() {
+            if (this.userRole !== 'admin') {
+                return this.allDashboards.filter(d => d.id !== 'restaurants');
+            }
+            return this.allDashboards;
+        },
+        userInitials() {
+            if (this.userRole === 'admin') return 'AD';
+            return this.unifiedTeamSk ? this.unifiedTeamSk.slice(0, 2).toUpperCase() : 'US';
+        },
+        displayName() {
+            if (this.userRole === 'admin') return 'Admin';
+            return 'Mi Cuenta';
+        }
+    },
     data() {
         return {
-            dashboards: [
+            allDashboards: [
                 { id: 'daily', name: 'Daily Sales', icon: 'fas fa-calendar-day' },
                 { id: 'restaurants', name: 'Detalle de restaurantes', icon: 'fas fa-store' },
                 { id: 'inventario', name: 'Inventario', icon: 'fas fa-box' },
                 { id: 'finanzas', name: 'Finanzas', icon: 'fas fa-dollar-sign' }
             ]
         }
-        
     },
     methods: {
         selectDashboard(id) {
             this.$emit('change-dashboard', id);
-            // En móvil cerrar automáticamente
             if (window.innerWidth <= 768) {
                 this.$emit('close-sidebar');
             }
         },
         closeSidebar() {
             this.$emit('close-sidebar');
+        },
+        logout() {
+            this.$emit('logout');
         }
     }
 };

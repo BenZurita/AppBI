@@ -4,17 +4,18 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy import text
 
 from cache import get_cache
 from Database import AsyncSessionLocal
+from auth import RestaurantFilter, get_current_user, CurrentUser
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
 # ============================================================
-# HELPERS (CORREGIDOS para manejar fechas correctamente)
+# HELPERS (sin cambios)
 # ============================================================
 
 def date_to_date_id(d: datetime) -> int:
@@ -44,13 +45,13 @@ def get_month_range(date_id: int) -> tuple[int, int]:
 
 
 # ============================================================
-# ENDPOINT: Restaurantes
+# ENDPOINT: Restaurantes (con filtro de seguridad)
 # ============================================================
 
 @router.get("/restaurants")
-async def restaurants_list():
+async def restaurants_list(current_user: CurrentUser):
     """Lista de restaurantes desde unified_restaurant_map"""
-    cache_key = "restaurants_list"
+    cache_key = f"restaurants_list:{current_user['username']}"
     
     try:
         cache = get_cache()
@@ -61,12 +62,25 @@ async def restaurants_list():
         cache = None
 
     async with AsyncSessionLocal() as session:
-        result = await session.execute(text("""
-            SELECT unified_team_sk as id, restaurant_name as name, region, city_name
-            FROM unified_restaurant_map
-            WHERE is_active = TRUE
-            ORDER BY restaurant_name
-        """))
+        # Si no es admin, solo mostrar su restaurante
+        if current_user.get("role") != "admin":
+            result = await session.execute(
+                text("""
+                    SELECT unified_team_sk as id, restaurant_name as name, region, city_name
+                    FROM unified_restaurant_map
+                    WHERE restaurant_code = :code AND is_active = TRUE
+                    ORDER BY restaurant_name
+                """),
+                {"code": current_user.get("restaurant_code")}
+            )
+        else:
+            result = await session.execute(text("""
+                SELECT unified_team_sk as id, restaurant_name as name, region, city_name
+                FROM unified_restaurant_map
+                WHERE is_active = TRUE
+                ORDER BY restaurant_name
+            """))
+        
         rows = result.fetchall()
         
         response = {
@@ -80,7 +94,7 @@ async def restaurants_list():
 
 
 # ============================================================
-# ENDPOINT: Daily Dashboard (simplificado)
+# ENDPOINT: Daily Dashboard (con filtro de seguridad)
 # ============================================================
 
 @router.get("/dashboard/daily")
@@ -89,10 +103,15 @@ async def dashboard_daily(
     date: Optional[str] = Query(None),
     preset: str = Query("today"),
     restaurant: str = Query("all"),
+    restaurant_filter: RestaurantFilter = None
 ):
     """
     Dashboard diario optimizado - solo lectura de tablas pre-calculadas
     """
+    # Aplicar filtro de seguridad
+    if restaurant_filter and not restaurant_filter["can_view_all"]:
+        restaurant = restaurant_filter["restaurant_filter"]
+    
     # Validar fecha
     try:
         hoy = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
@@ -103,7 +122,7 @@ async def dashboard_daily(
     unified_team_sk = None if restaurant == "all" else restaurant
 
     # Cache
-    cache_key = hashlib.md5(f"daily:{hoy_id}:{restaurant}".encode()).hexdigest()
+    cache_key = hashlib.md5(f"daily:{hoy_id}:{restaurant}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
     try:
         cache = get_cache()
         hit = await cache.get(cache_key)
@@ -113,12 +132,11 @@ async def dashboard_daily(
         cache = None
 
     async with AsyncSessionLocal() as session:
-        # Calcular fechas de comparación (CORREGIDO: trabajar con datetime, no date_id)
+        # Calcular fechas de comparación
         ayer = hoy - timedelta(days=1)
-        hoy_sp = hoy - timedelta(days=7)  # Mismo día semana pasada
+        hoy_sp = hoy - timedelta(days=7)
         ayer_sp = ayer - timedelta(days=7)
         
-        # Convertir a date_id después de las operaciones de fecha
         ayer_id = date_to_date_id(ayer)
         hoy_sp_id = date_to_date_id(hoy_sp)
         ayer_sp_id = date_to_date_id(ayer_sp)
@@ -127,7 +145,6 @@ async def dashboard_daily(
         sem_pas_inicio, sem_pas_fin = get_week_range(hoy_sp_id)
         
         mes_inicio, mes_fin = get_month_range(hoy_id)
-        # Mes pasado
         mes_pas_date = hoy.replace(day=1) - timedelta(days=1)
         mes_pas_inicio, mes_pas_fin = get_month_range(date_to_date_id(mes_pas_date))
 
@@ -349,7 +366,7 @@ async def dashboard_daily(
                         ]
                     },
                 ],
-                "charts": []  # Pendiente: tendencias mensuales
+                "charts": []
             },
         }
 
@@ -363,7 +380,7 @@ async def dashboard_daily(
 
 
 # ============================================================
-# ENDPOINT: Detalle de Restaurantes (tabla comparativa)
+# ENDPOINT: Detalle de Restaurantes (con filtro de seguridad)
 # ============================================================
 
 @router.get("/dashboard/restaurants")
@@ -371,17 +388,22 @@ async def dashboard_restaurants(
     start_date: str = Query(...),
     end_date: str = Query(...),
     restaurants: list[str] = Query(default=["all"]),
+    restaurant_filter: RestaurantFilter = None
 ):
     """
     Tabla comparativa de restaurantes en un rango de fechas
     """
+    # Aplicar filtro de seguridad
+    if restaurant_filter and not restaurant_filter["can_view_all"]:
+        restaurants = [restaurant_filter["restaurant_filter"]]
+    
     try:
         date_start = int(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d"))
         date_end = int(datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d"))
     except ValueError:
         raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
 
-    cache_key = hashlib.md5(f"restaurants:{date_start}:{date_end}:{':'.join(sorted(restaurants))}".encode()).hexdigest()
+    cache_key = hashlib.md5(f"restaurants:{date_start}:{date_end}:{':'.join(sorted(restaurants))}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
     
     try:
         cache = get_cache()
@@ -393,14 +415,14 @@ async def dashboard_restaurants(
 
     async with AsyncSessionLocal() as session:
         # Filtro de restaurantes
-        restaurant_filter = ""
+        restaurant_filter_sql = ""
         params = {"start": date_start, "end": date_end}
         
         if restaurants and "all" not in restaurants:
-            restaurant_filter = "AND d.unified_team_sk = ANY(:restaurants)"
+            restaurant_filter_sql = "AND d.unified_team_sk = ANY(:restaurants)"
             params["restaurants"] = restaurants
 
-        # Query principal simplificada
+        # Query principal
         sql = text(f"""
             SELECT 
                 r.restaurant_name as restaurant,
@@ -418,7 +440,7 @@ async def dashboard_restaurants(
             LEFT JOIN queso_metric q ON d.date_id = q.date_id AND d.unified_team_sk = q.unified_team_sk
             LEFT JOIN gde_metric g ON d.date_id = g.date_id AND d.unified_team_sk = g.unified_team_sk
             WHERE d.date_id BETWEEN :start AND :end
-            {restaurant_filter}
+            {restaurant_filter_sql}
             GROUP BY r.restaurant_name
             HAVING SUM(d.gmv) > 0
             ORDER BY SUM(d.gmv) DESC

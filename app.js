@@ -8,31 +8,39 @@ createApp({
     data() {
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
-        // Fecha inicio del año para el filtro de tabla
         const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
+        
+        // Verificar autenticación al iniciar
+        if (!apiService.isAuthenticated()) {
+            window.location.href = '/login.html';
+            return {};
+        }
         
         return {
             currentDashboard: 'daily',
             sidebarOpen: true,
             loading: false,
             
-            // Datos Dashboard Principal
+            // Datos de usuario - ESTAS VARIABLES FALTABAN EN EL VIEJO app.js
+            userRole: apiService.getRole(),
+            userRestaurantCode: apiService.getRestaurantCode(),
+            username: apiService.getUsername(),
+            userRestaurantName: '',
+            
             kpis: [],
             secondaryMetrics: [],
             charts: [],
             
-            // Filtros Dashboard Principal
             selectedDate: todayStr,
             datePreset: 'today',
             restaurants: [],
-            selectedRestaurant: 'all',
+            selectedRestaurant: apiService.isAdmin() ? 'all' : apiService.getRestaurantCode(),
             
-            // Filtros para Tabla de Restaurantes (independientes)
             tableStartDate: startOfYear,
             tableEndDate: todayStr,
-            tableRestaurants: ['all'],
+            tableRestaurants: apiService.isAdmin() ? ['all'] : [apiService.getRestaurantCode()],
+            showRestaurantDropdown: false,
             
-            // Configuración Tabla
             tableData: [],
             tableColumns: [
                 { key: 'restaurant', label: 'Restaurante' },
@@ -64,6 +72,11 @@ createApp({
             return titles[this.currentDashboard] || 'Dashboard';
         },
         
+        // ESTE COMPUTED FALTABA - isAdmin
+        isAdmin() {
+            return apiService.isAdmin();
+        },
+        
         maxDate() {
             return new Date().toISOString().split('T')[0];
         },
@@ -74,24 +87,68 @@ createApp({
             return this.formatDisplayDate(this.selectedDate);
         },
         
-        // Para mostrar el período en la tabla
         tablePeriodLabel() {
             return `${this.formatDisplayDate(this.tableStartDate)} - ${this.formatDisplayDate(this.tableEndDate)}`;
+        },
+        
+        isAllSelected() {
+            return this.tableRestaurants.includes('all') || this.tableRestaurants.length === this.restaurants.length;
+        },
+        
+        selectedRestaurantsText() {
+            if (this.tableRestaurants.includes('all') || this.tableRestaurants.length === 0) {
+                return 'Todos los restaurantes';
+            }
+            if (this.tableRestaurants.length === 1) {
+                const rest = this.restaurants.find(r => r.id === this.tableRestaurants[0]);
+                return rest ? rest.name : '1 seleccionado';
+            }
+            return `${this.tableRestaurants.length} restaurantes seleccionados`;
         }
     },
     mounted() {
+        // Verificar autenticación
+        if (!apiService.isAuthenticated()) {
+            window.location.href = '/login.html';
+            return;
+        }
+        
+        // Si no es admin, forzar su restaurante
+        if (!apiService.isAdmin()) {
+            this.selectedRestaurant = apiService.getRestaurantCode();
+            this.tableRestaurants = [apiService.getRestaurantCode()];
+        }
+        
         this.loadRestaurants();
         this.loadDashboardData();
+        
         if (window.innerWidth <= 768) {
             this.sidebarOpen = false;
         }
+        
+        // Cerrar dropdown al hacer click fuera
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.custom-dropdown')) {
+                this.showRestaurantDropdown = false;
+            }
+        });
     },
     methods: {
         toggleSidebar() {
             this.sidebarOpen = !this.sidebarOpen;
         },
         
+        // ESTE MÉTODO FALTABA - logout
+        logout() {
+            apiService.logout();
+        },
+        
         async changeDashboard(dashboardId) {
+            // Si no es admin, bloquear vista restaurants
+            if (!this.isAdmin && dashboardId === 'restaurants') {
+                alert('Solo los administradores pueden ver el detalle de todos los restaurantes.');
+                return;
+            }
             this.currentDashboard = dashboardId;
             await this.loadDashboardData();
         },
@@ -102,24 +159,37 @@ createApp({
             return `${day}/${month}/${year}`;
         },
         
-        // Cargar lista de restaurantes para selectores
         async loadRestaurants() {
             try {
                 const response = await apiService.getRestaurants();
                 if (response.success) {
                     this.restaurants = response.data || [];
+                    
+                    // Guardar nombre del restaurante del usuario
+                    if (!this.isAdmin && this.userRestaurantCode) {
+                        const userRest = this.restaurants.find(r => 
+                            String(r.id) === String(this.userRestaurantCode)
+                        );
+                        if (userRest) {
+                            this.userRestaurantName = userRest.name;
+                        }
+                    }
                 }
             } catch (error) {
                 console.error('Error cargando restaurantes:', error);
             }
         },
         
-        // Cambiar restaurante en dashboard principal
         async changeRestaurant() {
+            // Si no es admin, no permitir cambiar de restaurante
+            if (!this.isAdmin && this.selectedRestaurant !== this.userRestaurantCode) {
+                this.selectedRestaurant = this.userRestaurantCode;
+                alert('Solo puedes ver tu restaurante asignado');
+                return;
+            }
             await this.loadDashboardData();
         },
         
-        // Filtros de fecha dashboard principal
         async setDatePreset(preset) {
             this.datePreset = preset;
             const today = new Date();
@@ -144,23 +214,49 @@ createApp({
             }
         },
         
-        // Aplicar filtro de tabla ( Dashboard restaurants )
         async applyTableFilter() {
+            if (!this.isAdmin) {
+                this.tableRestaurants = [this.userRestaurantCode];
+            }
             if (this.currentDashboard === 'restaurants') {
                 await this.loadDashboardData();
             }
         },
         
-        // Cargar datos según el dashboard activo
+        toggleRestaurant(restId) {
+            if (this.tableRestaurants.includes('all')) {
+                this.tableRestaurants = [restId];
+            } else {
+                const index = this.tableRestaurants.indexOf(restId);
+                if (index > -1) {
+                    this.tableRestaurants.splice(index, 1);
+                    if (this.tableRestaurants.length === 0) {
+                        this.tableRestaurants = ['all'];
+                    }
+                } else {
+                    this.tableRestaurants.push(restId);
+                }
+            }
+        },
+        
+        toggleAllRestaurants() {
+            if (this.isAllSelected) {
+                this.tableRestaurants = [];
+            } else {
+                this.tableRestaurants = ['all'];
+            }
+        },
+        
         async loadDashboardData() {
             this.loading = true;
             try {
                 if (this.currentDashboard === 'restaurants') {
-                    // Endpoint especial para tabla de restaurantes
+                    const restaurants = this.isAdmin ? this.tableRestaurants : [this.userRestaurantCode];
+                    
                     const params = {
                         start_date: this.tableStartDate,
                         end_date: this.tableEndDate,
-                        restaurants: this.tableRestaurants
+                        restaurants: restaurants
                     };
                     
                     const response = await apiService.getDashboardData('restaurants', params);
@@ -168,7 +264,6 @@ createApp({
                     this.tableData = data.table || [];
                     
                 } else {
-                    // Dashboard normal (daily, etc.)
                     const params = {
                         date: this.selectedDate,
                         preset: this.datePreset,
@@ -183,7 +278,6 @@ createApp({
                 }
             } catch (error) {
                 console.error('Error cargando datos:', error);
-                // Resetear datos según el modo
                 if (this.currentDashboard === 'restaurants') {
                     this.tableData = [];
                 } else {

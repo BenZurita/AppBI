@@ -42,7 +42,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,  # ✅ CORREGIDO: False ya que no usas auth todavía
+    allow_credentials=True,  # ✅ CORREGIDO: True para autenticación JWT
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -94,8 +94,17 @@ async def serve_index():
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/login.html")
+async def serve_login():
+    return FileResponse(FRONTEND_DIR / "login.html")
+
+
 @app.get("/{filename}")
 async def serve_file(filename: str):
+    # No servir rutas de API como archivos estáticos
+    if filename.startswith("api/") or filename.startswith("auth/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    
     file_path = FRONTEND_DIR / filename
     if file_path.exists() and file_path.is_file():
         return FileResponse(file_path)

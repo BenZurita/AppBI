@@ -23,9 +23,12 @@ const apiService = {
             throw new Error(data.detail || 'Error de autenticación');
         }
 
-        // Guardar token y usuario en localStorage
         localStorage.setItem('token', data.access_token);
         localStorage.setItem('username', data.username);
+        localStorage.setItem('role', data.role);
+        if (data.unified_team_sk) {
+            localStorage.setItem('unified_team_sk', data.unified_team_sk);
+        }
 
         return data;
     },
@@ -33,11 +36,29 @@ const apiService = {
     logout() {
         localStorage.removeItem('token');
         localStorage.removeItem('username');
+        localStorage.removeItem('role');
+        localStorage.removeItem('unified_team_sk');
         window.location.href = '/login.html';
     },
 
     getToken() {
         return localStorage.getItem('token');
+    },
+
+    getRole() {
+        return localStorage.getItem('role') || 'restaurant';
+    },
+
+    getUnifiedTeamSk() {
+        return localStorage.getItem('unified_team_sk');
+    },
+
+    getUsername() {
+        return localStorage.getItem('username') || 'Usuario';
+    },
+
+    isAdmin() {
+        return this.getRole() === 'admin';
     },
 
     isAuthenticated() {
@@ -62,10 +83,13 @@ const apiService = {
 
         const response = await fetch(url, { ...options, headers });
 
-        // ✅ CORREGIDO: Lanzar error en lugar de retornar null
         if (response.status === 401) {
             this.logout();
             throw new Error('Sesión expirada o no autorizado');
+        }
+
+        if (response.status === 403) {
+            throw new Error('No tienes permiso para ver estos datos');
         }
 
         if (!response.ok) {
@@ -83,7 +107,6 @@ const apiService = {
         try {
             const url = new URL(`${API_BASE_URL}/dashboard/${dashboardType}`);
 
-            // Agregar query params (maneja arrays correctamente para ?restaurants=a&restaurants=b)
             Object.entries(params).forEach(([key, value]) => {
                 if (Array.isArray(value)) {
                     value.forEach(v => url.searchParams.append(key, v));
@@ -128,7 +151,7 @@ const apiService = {
     },
 
     // =========================================================================
-    // MOCK DATA (fallback si el backend no responde)
+    // MOCK DATA (fallback)
     // =========================================================================
 
     getMockData(type) {
