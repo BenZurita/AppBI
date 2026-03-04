@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App BI - Panel de Control</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <button class="toggle-btn" @click="toggleSidebar" :class="{ 'hidden': sidebarOpen }">
+            <i class="fas fa-bars"></i>
+        </button>
+
+        <div class="layout" :class="{ 'sidebar-closed': !sidebarOpen }">
+            <sidebar 
+                :current-dashboard="currentDashboard"
+                :is-open="sidebarOpen"
+                @change-dashboard="changeDashboard"
+                @close-sidebar="sidebarOpen = false">
+            </sidebar>
+
+            <main class="main-content">
+                <header class="top-bar">
+                    <div class="header-left">
+                        <button class="menu-toggle" @click="toggleSidebar">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <h1>{{ dashboardTitle }}</h1>
+                    </div>
+                    <div class="user-menu">
+                        <span class="date">{{ currentDate }}</span>
+                    </div>
+                </header>
+
+                <!-- FILTROS DASHBOARD PRINCIPAL (Daily Sales) -->
+                <div v-if="currentDashboard === 'daily'" class="date-filter-bar">
+                    <div class="filters-left">
+                        <div class="restaurant-filter">
+                            <label for="restaurant-select">
+                                <i class="fas fa-store"></i>
+                            </label>
+                            <select id="restaurant-select" v-model="selectedRestaurant" @change="changeRestaurant" class="restaurant-select">
+                                <option value="all">Todos los restaurantes</option>
+                                <option v-for="rest in restaurants" :key="rest.id" :value="rest.id">
+                                    {{ rest.name }}
+                                </option>
+                            </select>
+                        </div>
+
+                        <div class="separator"></div>
+
+                        <div class="date-presets">
+                            <button 
+                                v-for="preset in ['today', 'yesterday']" 
+                                :key="preset"
+                                @click="setDatePreset(preset)"
+                                :class="{ active: datePreset === preset }"
+                                class="preset-btn">
+                                {{ preset === 'today' ? 'Hoy' : 'Ayer' }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="date-picker-wrapper">
+                        <input 
+                            type="date" 
+                            v-model="selectedDate" 
+                            @change="onDateInputChange"
+                            class="date-input"
+                            :max="maxDate"
+                        >
+                        <div class="reference-date-badge" v-if="datePreset === 'custom'">
+                            <i class="fas fa-crosshairs"></i>
+                            <span>{{ formatDisplayDate(selectedDate) }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- FILTROS TABLA RESTAURANTES (Diseño Dropdown Profesional) -->
+                <div v-if="currentDashboard === 'restaurants'" class="table-filters-panel">
+                    <div class="filter-section">
+                        <h4 class="filter-title">
+                            <i class="fas fa-filter"></i>
+                            Filtros de Período
+                        </h4>
+                        
+                        <div class="filters-row">
+                            <div class="filter-group date-range">
+                                <label>Rango de Fechas</label>
+                                <div class="date-inputs">
+                                    <input 
+                                        type="date" 
+                                        v-model="tableStartDate" 
+                                        class="date-input"
+                                    >
+                                    <span class="date-separator">hasta</span>
+                                    <input 
+                                        type="date" 
+                                        v-model="tableEndDate" 
+                                        class="date-input"
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="filter-group restaurant-dropdown">
+                                <label>Restaurantes</label>
+                                <div class="custom-dropdown" :class="{ 'active': showRestaurantDropdown }">
+                                    <div class="dropdown-trigger" @click="showRestaurantDropdown = !showRestaurantDropdown">
+                                        <span class="selected-text">{{ selectedRestaurantsText }}</span>
+                                        <i class="fas fa-chevron-down"></i>
+                                    </div>
+                                    <div class="dropdown-menu" v-if="showRestaurantDropdown">
+                                        <div class="dropdown-item checkbox-item" @click="toggleAllRestaurants">
+                                            <input type="checkbox" :checked="isAllSelected" id="select-all-rests">
+                                            <label for="select-all-rests">Seleccionar Todos</label>
+                                        </div>
+                                        <div class="dropdown-divider"></div>
+                                        <div class="dropdown-item checkbox-item" 
+                                             v-for="rest in restaurants" 
+                                             :key="rest.id"
+                                             @click.stop="toggleRestaurant(rest.id)">
+                                            <input type="checkbox" 
+                                                   :checked="tableRestaurants.includes(rest.id) || tableRestaurants.includes('all')" 
+                                                   :id="'rest-' + rest.id">
+                                            <label :for="'rest-' + rest.id">{{ rest.name }}</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <small class="help-text">Click para abrir opciones</small>
+                            </div>
+
+                            <div class="filter-group actions">
+                                <button @click="applyTableFilter" class="btn-primary">
+                                    <i class="fas fa-search"></i>
+                                    Consultar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CONTENIDO PRINCIPAL -->
+                <dashboard-grid 
+                    :kpis="kpis" 
+                    :secondary-metrics="secondaryMetrics"
+                    :charts="charts"
+                    :table-data="tableData"
+                    :table-columns="tableColumns"
+                    :is-table-mode="currentDashboard === 'restaurants'"
+                    :loading="loading">
+                </dashboard-grid>
+            </main>
+        </div>
+    </div>
+
+    <script src="KPICard.js"></script>
+    <script src="DashboardGrid.js"></script>
+    <script src="sidebar.js"></script>
+    <script src="API.js"></script>
+    
+    <script>
+    const app = Vue.createApp({
+        components: {
+            'sidebar': Sidebar,
+            'dashboard-grid': DashboardGrid
+        },
+        data() {
+            const today = new Date();
+            const todayStr = today.toISOString().split('T')[0];
+            const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
+            
+            return {
+                currentDashboard: 'daily',
+                sidebarOpen: true,
+                loading: false,
+                
+                kpis: [],
+                secondaryMetrics: [],
+                charts: [],
+                
+                selectedDate: todayStr,
+                datePreset: 'today',
+                restaurants: [],
+                selectedRestaurant: 'all',
+                
+                tableStartDate: startOfYear,
+                tableEndDate: todayStr,
+                tableRestaurants: ['all'],
+                showRestaurantDropdown: false,
+                
+                tableData: [],
+                tableColumns: [
+                    { key: 'restaurant', label: 'Restaurante' },
+                    { key: 'gmv', label: 'GMV' },
+                    { key: 'trx', label: 'Transacciones' },
+                    { key: 'aov', label: 'AOV' },
+                    { key: 'barquilla', label: 'Barquilla %' },
+                    { key: 'queso', label: 'Queso %' },
+                    { key: 'agrandado', label: 'Agrandado %' },
+                    { key: 'cambio', label: 'Cambio Pz %' }
+                ],
+                
+                currentDate: today.toLocaleDateString('es-ES', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                })
+            };
+        },
+        computed: {
+            dashboardTitle() {
+                const titles = {
+                    'daily': 'Daily Sales',
+                    'restaurants': 'Detalle de Restaurantes',
+                    'inventario': 'Inventario',
+                    'finanzas': 'Finanzas'
+                };
+                return titles[this.currentDashboard] || 'Dashboard';
+            },
+            
+            maxDate() {
+                return new Date().toISOString().split('T')[0];
+            },
+            
+            displayDate() {
+                if (this.datePreset === 'today') return 'Hoy';
+                if (this.datePreset === 'yesterday') return 'Ayer';
+                return this.formatDisplayDate(this.selectedDate);
+            },
+            
+            tablePeriodLabel() {
+                return `${this.formatDisplayDate(this.tableStartDate)} - ${this.formatDisplayDate(this.tableEndDate)}`;
+            },
+            
+            isAllSelected() {
+                return this.tableRestaurants.includes('all') || this.tableRestaurants.length === this.restaurants.length;
+            },
+            
+            selectedRestaurantsText() {
+                if (this.tableRestaurants.includes('all') || this.tableRestaurants.length === 0) {
+                    return 'Todos los restaurantes';
+                }
+                if (this.tableRestaurants.length === 1) {
+                    const rest = this.restaurants.find(r => r.id === this.tableRestaurants[0]);
+                    return rest ? rest.name : '1 seleccionado';
+                }
+                return `${this.tableRestaurants.length} restaurantes seleccionados`;
+            }
+        },
+        mounted() {
+            this.loadRestaurants();
+            this.loadDashboardData();
+            if (window.innerWidth <= 768) {
+                this.sidebarOpen = false;
+            }
+            
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.custom-dropdown')) {
+                    this.showRestaurantDropdown = false;
+                }
+            });
+        },
+        methods: {
+            toggleSidebar() {
+                this.sidebarOpen = !this.sidebarOpen;
+            },
+            
+            async changeDashboard(dashboardId) {
+                this.currentDashboard = dashboardId;
+                await this.loadDashboardData();
+            },
+            
+            formatDisplayDate(dateString) {
+                if (!dateString) return '';
+                const [year, month, day] = dateString.split('-');
+                return `${day}/${month}/${year}`;
+            },
+            
+            async loadRestaurants() {
+                try {
+                    const response = await apiService.getRestaurants();
+                    if (response.success) {
+                        this.restaurants = response.data || [];
+                    }
+                } catch (error) {
+                    console.error('Error cargando restaurantes:', error);
+                }
+            },
+            
+            async changeRestaurant() {
+                await this.loadDashboardData();
+            },
+            
+            async setDatePreset(preset) {
+                this.datePreset = preset;
+                const today = new Date();
+                
+                if (preset === 'today') {
+                    this.selectedDate = today.toISOString().split('T')[0];
+                } else if (preset === 'yesterday') {
+                    const yesterday = new Date(today);
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    this.selectedDate = yesterday.toISOString().split('T')[0];
+                }
+                
+                await this.loadDashboardData();
+            },
+            
+            async onDateInputChange(event) {
+                const newDate = event.target.value;
+                if (newDate) {
+                    this.selectedDate = newDate;
+                    this.datePreset = 'custom';
+                    await this.loadDashboardData();
+                }
+            },
+            
+            async applyTableFilter() {
+                if (this.currentDashboard === 'restaurants') {
+                    await this.loadDashboardData();
+                }
+            },
+            
+            toggleRestaurant(restId) {
+                if (this.tableRestaurants.includes('all')) {
+                    this.tableRestaurants = [restId];
+                } else {
+                    const index = this.tableRestaurants.indexOf(restId);
+                    if (index > -1) {
+                        this.tableRestaurants.splice(index, 1);
+                        if (this.tableRestaurants.length === 0) {
+                            this.tableRestaurants = ['all'];
+                        }
+                    } else {
+                        this.tableRestaurants.push(restId);
+                    }
+                }
+            },
+            
+            toggleAllRestaurants() {
+                if (this.isAllSelected) {
+                    this.tableRestaurants = [];
+                } else {
+                    this.tableRestaurants = ['all'];
+                }
+            },
+            
+            async loadDashboardData() {
+                this.loading = true;
+                try {
+                    if (this.currentDashboard === 'restaurants') {
+                        const params = {
+                            start_date: this.tableStartDate,
+                            end_date: this.tableEndDate,
+                            restaurants: this.tableRestaurants
+                        };
+                        
+                        const response = await apiService.getDashboardData('restaurants', params);
+                        const data = response.data || response;
+                        this.tableData = data.table || [];
+                        
+                    } else {
+                        const params = {
+                            date: this.selectedDate,
+                            preset: this.datePreset,
+                            restaurant: this.selectedRestaurant
+                        };
+                        
+                        const response = await apiService.getDashboardData(this.currentDashboard, params);
+                        const data = response.data || response;
+                        this.kpis = data.kpis || [];
+                        this.secondaryMetrics = data.secondary_metrics || [];
+                        this.charts = data.charts || [];
+                    }
+                } catch (error) {
+                    console.error('Error cargando datos:', error);
+                    if (this.currentDashboard === 'restaurants') {
+                        this.tableData = [];
+                    } else {
+                        this.kpis = [];
+                        this.secondaryMetrics = [];
+                        this.charts = [];
+                    }
+                } finally {
+                    this.loading = false;
+                }
+            }
+        }
+    }).mount('#app');
+    </script>
+</body>
+</html>
