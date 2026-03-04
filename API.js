@@ -23,11 +23,22 @@ const apiService = {
             throw new Error(data.detail || 'Error de autenticación');
         }
 
+        // DEBUG: Log de la respuesta
+        console.log('[DEBUG] Login response:', data);
+
         localStorage.setItem('token', data.access_token);
         localStorage.setItem('username', data.username);
         localStorage.setItem('role', data.role);
-        if (data.unified_team_sk) {
+        localStorage.setItem('can_view_all', data.can_view_all ? 'true' : 'false');
+        
+        // CORREGIDO: Usar != null para chequear tanto null como undefined
+        // También aceptar string vacío pero no null/undefined
+        if (data.unified_team_sk != null && data.unified_team_sk !== '') {
             localStorage.setItem('unified_team_sk', data.unified_team_sk);
+            console.log('[DEBUG] Saved unified_team_sk:', data.unified_team_sk);
+        } else {
+            localStorage.removeItem('unified_team_sk');
+            console.log('[DEBUG] No unified_team_sk to save (null or undefined)');
         }
 
         return data;
@@ -38,6 +49,7 @@ const apiService = {
         localStorage.removeItem('username');
         localStorage.removeItem('role');
         localStorage.removeItem('unified_team_sk');
+        localStorage.removeItem('can_view_all');
         window.location.href = '/login.html';
     },
 
@@ -49,6 +61,10 @@ const apiService = {
         return localStorage.getItem('role') || 'restaurant';
     },
 
+    canViewAll() {
+        return localStorage.getItem('can_view_all') === 'true';
+    },
+
     getUnifiedTeamSk() {
         return localStorage.getItem('unified_team_sk');
     },
@@ -58,7 +74,7 @@ const apiService = {
     },
 
     isAdmin() {
-        return this.getRole() === 'admin';
+        return this.getRole() === 'admin' || this.canViewAll();
     },
 
     isAuthenticated() {

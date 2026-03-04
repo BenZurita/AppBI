@@ -1,14 +1,13 @@
 import os
-import json
 import hashlib
+import bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict  # NUEVO: ConfigDict
 from sqlalchemy import text
 from Database import AsyncSessionLocal
 
@@ -18,28 +17,33 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "cambia-esto-en-produccion-usa-openssl
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 480))
 
-# ─── Utilidades ───────────────────────────────────────────────────────────────
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
+# ─── Utilidades de Password ───────────────────────────────────────────────────
 
 def _verify_password(plain: str, hashed: str) -> bool:
     """Verifica contra MD5 o bcrypt."""
-    # Bcrypt
-    if hashed.startswith("$2b$") or hashed.startswith("$2a$"):
-        return pwd_context.verify(plain, hashed)
-    # MD5 (32 hex chars)
+    plain_bytes = plain.encode('utf-8')
+    
+    # MD5 (32 hex chars) - Usado por restaurantes
     if len(hashed) == 32 and all(c in '0123456789abcdef' for c in hashed.lower()):
-        return hashlib.md5(plain.encode()).hexdigest() == hashed.lower()
+        return hashlib.md5(plain_bytes).hexdigest() == hashed.lower()
+    
+    # Bcrypt - Usado por admin
+    if hashed.startswith("$2"):
+        try:
+            if len(plain_bytes) > 72:
+                plain_bytes = plain_bytes[:72]
+            return bcrypt.checkpw(plain_bytes, hashed.encode('utf-8'))
+        except Exception as e:
+            print(f"[DEBUG] Error bcrypt: {e}")
+            return False
+    
     return False
 
 
 async def _get_user_from_db(username: str) -> dict | None:
-    """
-    Obtiene usuario desde la tabla USERS.
-    Ahora usa unified_team_sk en lugar de restaurant_code.
-    """
+    """Obtiene usuario desde la tabla USERS."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text("""
@@ -68,7 +72,7 @@ def _create_access_token(data: dict) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-# ─── Dependency: Usuario actual ───────────────────────────────────────────────
+# ─── Dependencies ─────────────────────────────────────────────────────────────
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> dict:
     credentials_exc = HTTPException(
@@ -90,18 +94,15 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> dic
     return user
 
 
-# ─── Dependency: Verificar acceso a restaurante ─────────────────────────────────
-
 async def get_user_restaurant_filter(
     current_user: Annotated[dict, Depends(get_current_user)],
     requested_restaurant: Optional[str] = Query(None, alias="restaurant")
 ) -> dict:
-    """
-    Retorna el filtro de restaurante aplicable al usuario.
-    Admin puede ver todo, restaurant user solo el suyo (por unified_team_sk).
-    """
+    """Retorna el filtro de restaurante aplicable al usuario."""
     role = current_user.get("role", "restaurant")
     user_team_sk = current_user.get("unified_team_sk")
+    
+    print(f"[DEBUG] Filter check: user={current_user.get('username')}, role={role}, team_sk={user_team_sk}, requested={requested_restaurant}")
     
     if role == "admin":
         return {
@@ -111,36 +112,50 @@ async def get_user_restaurant_filter(
         }
     
     if role == "restaurant":
+        if not user_team_sk:
+            print(f"[ERROR] Usuario {current_user.get('username')} es restaurante pero no tiene unified_team_sk")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuario de restaurante sin establecimiento asignado. Contacte al administrador."
+            )
+        
         if requested_restaurant and requested_restaurant != str(user_team_sk) and requested_restaurant != "all":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"No tienes permiso para ver el restaurante {requested_restaurant}"
             )
+        
         return {
             "can_view_all": False,
-            "restaurant_filter": str(user_team_sk) if user_team_sk else None,
+            "restaurant_filter": str(user_team_sk),
             "user": current_user
         }
     
     raise HTTPException(status_code=403, detail="Rol no válido")
 
 
-# Alias cortos para Depends
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 RestaurantFilter = Annotated[dict, Depends(get_user_restaurant_filter)]
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 
 class Token(BaseModel):
+    # NUEVO: Configuración para incluir campos None en el JSON
+    model_config = ConfigDict(exclude_none=False)
+    
     access_token: str
     token_type: str
     username: str
     role: str
     unified_team_sk: Optional[str] = None
+    can_view_all: bool
     expires_in_minutes: int
 
 
 class UserInfo(BaseModel):
+    # NUEVO: Configuración para incluir campos None en el JSON
+    model_config = ConfigDict(exclude_none=False)
+    
     username: str
     role: str
     unified_team_sk: Optional[str] = None
@@ -154,33 +169,50 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/token", response_model=Token)
 async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
-    """
-    Login: 
-    - Admin: username='admin', password='admin123'
-    - Restaurante: username=código_restaurante, password=código_restaurante x 2
-    """
+    """Login endpoint."""
+    print(f"[DEBUG] Login attempt: username={form_data.username}")
+    
     user = await _get_user_from_db(form_data.username)
-    if not user or not _verify_password(form_data.password, user["password"]):
+    if not user:
+        print(f"[DEBUG] User not found: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contraseña incorrectos",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    password_valid = _verify_password(form_data.password, user["password"])
+    print(f"[DEBUG] Password valid: {password_valid}")
+    
+    if not password_valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    role = user.get("role", "restaurant")
+    
+    if role == "restaurant" and not user.get("unified_team_sk"):
+        print(f"[WARNING] Usuario {user['username']} es restaurante pero no tiene unified_team_sk asignado")
+    
     token_data = {
         "sub": user["username"],
-        "role": user.get("role", "restaurant"),
+        "role": role,
         "unified_team_sk": user.get("unified_team_sk")
     }
     
     token = _create_access_token(token_data)
     
+    print(f"[DEBUG] Login successful: {user['username']}, role={role}, team_sk={user.get('unified_team_sk')}")
+    
     return Token(
         access_token=token,
         token_type="bearer",
         username=user["username"],
-        role=token_data["role"],
-        unified_team_sk=token_data["unified_team_sk"],
+        role=role,
+        unified_team_sk=user.get("unified_team_sk"),  # Ahora se incluye en JSON aunque sea None
+        can_view_all=(role == "admin"),
         expires_in_minutes=ACCESS_TOKEN_EXPIRE_MINUTES,
     )
 

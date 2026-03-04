@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
 # ============================================================
-# HELPERS (sin cambios)
+# HELPERS
 # ============================================================
 
 def date_to_date_id(d: datetime) -> int:
@@ -62,24 +62,31 @@ async def restaurants_list(current_user: CurrentUser):
         cache = None
 
     async with AsyncSessionLocal() as session:
-        # Si no es admin, solo mostrar su restaurante
-        if current_user.get("role") != "admin":
-            result = await session.execute(
-                text("""
-                    SELECT unified_team_sk as id, restaurant_name as name, region, city_name
-                    FROM unified_restaurant_map
-                    WHERE restaurant_code = :code AND is_active = TRUE
-                    ORDER BY restaurant_name
-                """),
-                {"code": current_user.get("restaurant_code")}
-            )
-        else:
+        # Si es admin, mostrar todos
+        if current_user.get("role") == "admin":
             result = await session.execute(text("""
                 SELECT unified_team_sk as id, restaurant_name as name, region, city_name
                 FROM unified_restaurant_map
                 WHERE is_active = TRUE
                 ORDER BY restaurant_name
             """))
+        else:
+            # Para usuarios de restaurante: mostrar SOLO su restaurante
+            user_team_sk = current_user.get("unified_team_sk")
+            print(f"[DEBUG] restaurants_list for user: {current_user.get('username')}, team_sk: {user_team_sk}")
+            
+            if not user_team_sk:
+                return {"success": True, "data": []}  # No tiene restaurante asignado
+            
+            result = await session.execute(
+                text("""
+                    SELECT unified_team_sk as id, restaurant_name as name, region, city_name
+                    FROM unified_restaurant_map
+                    WHERE unified_team_sk = :team_sk AND is_active = TRUE
+                    ORDER BY restaurant_name
+                """),
+                {"team_sk": user_team_sk}
+            )
         
         rows = result.fetchall()
         
@@ -109,8 +116,13 @@ async def dashboard_daily(
     Dashboard diario optimizado - solo lectura de tablas pre-calculadas
     """
     # Aplicar filtro de seguridad
-    if restaurant_filter and not restaurant_filter["can_view_all"]:
-        restaurant = restaurant_filter["restaurant_filter"]
+    effective_restaurant = restaurant
+    if restaurant_filter:
+        if not restaurant_filter["can_view_all"]:
+            effective_restaurant = restaurant_filter["restaurant_filter"]
+            print(f"[DEBUG] Dashboard restricted to: {effective_restaurant}")
+        else:
+            print(f"[DEBUG] Admin view, restaurant param: {restaurant}")
     
     # Validar fecha
     try:
@@ -119,10 +131,12 @@ async def dashboard_daily(
         raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
     
     hoy_id = date_to_date_id(hoy)
-    unified_team_sk = None if restaurant == "all" else restaurant
+    
+    # unified_team_sk para filtrar (None si es "all")
+    unified_team_sk = None if effective_restaurant == "all" else effective_restaurant
 
     # Cache
-    cache_key = hashlib.md5(f"daily:{hoy_id}:{restaurant}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
+    cache_key = hashlib.md5(f"daily:{hoy_id}:{effective_restaurant}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
     try:
         cache = get_cache()
         hit = await cache.get(cache_key)
@@ -274,7 +288,7 @@ async def dashboard_daily(
             "meta": {
                 "reference_date": hoy.strftime("%Y-%m-%d"),
                 "preset": preset,
-                "restaurant_filter": restaurant,
+                "restaurant_filter": effective_restaurant,
                 "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             },
             "data": {
@@ -394,8 +408,10 @@ async def dashboard_restaurants(
     Tabla comparativa de restaurantes en un rango de fechas
     """
     # Aplicar filtro de seguridad
+    effective_restaurants = restaurants
     if restaurant_filter and not restaurant_filter["can_view_all"]:
-        restaurants = [restaurant_filter["restaurant_filter"]]
+        effective_restaurants = [restaurant_filter["restaurant_filter"]]
+        print(f"[DEBUG] Restaurants view restricted to: {effective_restaurants}")
     
     try:
         date_start = int(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d"))
@@ -403,7 +419,7 @@ async def dashboard_restaurants(
     except ValueError:
         raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
 
-    cache_key = hashlib.md5(f"restaurants:{date_start}:{date_end}:{':'.join(sorted(restaurants))}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
+    cache_key = hashlib.md5(f"restaurants:{date_start}:{date_end}:{':'.join(sorted(effective_restaurants))}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
     
     try:
         cache = get_cache()
@@ -418,9 +434,9 @@ async def dashboard_restaurants(
         restaurant_filter_sql = ""
         params = {"start": date_start, "end": date_end}
         
-        if restaurants and "all" not in restaurants:
+        if effective_restaurants and "all" not in effective_restaurants:
             restaurant_filter_sql = "AND d.unified_team_sk = ANY(:restaurants)"
-            params["restaurants"] = restaurants
+            params["restaurants"] = effective_restaurants
 
         # Query principal
         sql = text(f"""
