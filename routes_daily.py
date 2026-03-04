@@ -1,430 +1,256 @@
-"""
-routes_daily.py — Endpoints de dashboard (FastAPI async)
-"""
-
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import traceback
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
 
 from cache import get_cache
-from Database import engine
+from Database import AsyncSessionLocal
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
-# =============================================================================
-# CONTEXT MANAGER
-# =============================================================================
+# ============================================================
+# HELPERS (CORREGIDOS para manejar fechas correctamente)
+# ============================================================
 
-@asynccontextmanager
-async def _new_conn():
-    async with engine.connect() as conn:
-        yield conn
+def date_to_date_id(d: datetime) -> int:
+    """Convierte datetime a date_id (YYYYMMDD)"""
+    return int(d.strftime("%Y%m%d"))
 
+def date_id_to_date(date_id: int) -> datetime:
+    """Convierte date_id a datetime"""
+    return datetime.strptime(str(date_id), "%Y%m%d")
 
-# =============================================================================
-# QUERIES SQL - Construcción dinámica según team_sk
-# =============================================================================
+def get_week_range(date_id: int) -> tuple[int, int]:
+    """Retorna inicio (lunes) y fin (domingo) de la semana"""
+    d = date_id_to_date(date_id)
+    monday = d - timedelta(days=d.weekday())
+    sunday = monday + timedelta(days=6)
+    return date_to_date_id(monday), date_to_date_id(sunday)
 
-def _build_gmv_query(has_team_sk: bool, is_range: bool) -> str:
-    """Construye query GMV según si hay filtro de team_sk."""
-    date_filter = "fol.date_id BETWEEN :inicio AND :fin" if is_range else "fol.date_id = :date_id"
-    team_filter = "AND fol.team_sk = :team_sk" if has_team_sk else ""
-    
-    return f"""
-        SELECT SUM(CASE
-            WHEN fol.date_id < 20250601 THEN
-                CASE WHEN dp.group_name ILIKE '%%Delivery%%' OR dp.group_name ILIKE '%%IGTF%%'
-                     THEN 0.0 ELSE fol.price_subtotal_usd END
-            ELSE fol.price_subtotal_usd
-        END) AS gmv
-        FROM fact_order_line fol
-        LEFT JOIN dim_product dp ON fol.product_sk_n = dp.product_sk_n
-        WHERE {date_filter}
-        {team_filter}
-    """
+def get_month_range(date_id: int) -> tuple[int, int]:
+    """Retorna inicio y fin del mes"""
+    d = date_id_to_date(date_id)
+    start = d.replace(day=1)
+    if d.month == 12:
+        end = d.replace(year=d.year + 1, month=1, day=1) - timedelta(days=1)
+    else:
+        end = d.replace(month=d.month + 1, day=1) - timedelta(days=1)
+    return date_to_date_id(start), date_to_date_id(end)
 
 
-def _build_trx_query(has_team_sk: bool, is_range: bool) -> str:
-    """Construye query TRX según si hay filtro de team_sk."""
-    date_filter = "date_id BETWEEN :inicio AND :fin" if is_range else "date_id = :date_id"
-    team_filter = "AND team_sk_n = :team_sk" if has_team_sk else ""
-    
-    return f"""
-        SELECT COUNT(DISTINCT order_sk_n) AS trx
-        FROM pos_order_complete
-        WHERE {date_filter}
-        {team_filter}
-    """
-
-
-def _build_secondary_query(table: str, column: str, has_team_sk: bool, is_range: bool) -> str:
-    """Construye query para métricas secundarias."""
-    date_filter = "date_id BETWEEN :inicio AND :fin" if is_range else "date_id = :inicio"
-    team_filter = f"AND team_sk = :team_sk" if has_team_sk else ""
-    
-    return f"""
-        SELECT AVG({column}) AS avg_val FROM {table}
-        WHERE {date_filter}
-        {team_filter}
-    """
-
-
-def _build_monthly_trend_query(has_team_sk: bool) -> str:
-    """Construye query de tendencia mensual."""
-    team_filter = "AND fol.team_sk = :team_sk" if has_team_sk else ""
-    
-    return f"""
-        SELECT
-            SUBSTRING(date_id::text, 1, 6) AS year_month,
-            SUM(CASE
-                WHEN fol.date_id < 20250601 THEN
-                    CASE WHEN dp.group_name ILIKE '%%Delivery%%' OR dp.group_name ILIKE '%%IGTF%%'
-                         THEN 0.0 ELSE fol.price_subtotal_usd END
-                ELSE fol.price_subtotal_usd
-            END) AS gmv
-        FROM fact_order_line fol
-        LEFT JOIN dim_product dp ON fol.product_sk_n = dp.product_sk_n
-        WHERE fol.date_id BETWEEN :start_date AND :end_date
-        {team_filter}
-        GROUP BY SUBSTRING(date_id::text, 1, 6)
-        ORDER BY year_month ASC
-    """
-
-
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-async def _gmv_trx_day(date_id: int, team_sk: str | None) -> dict:
-    has_team = team_sk is not None
-    
-    async with _new_conn() as conn:
-        gmv_sql = text(_build_gmv_query(has_team, False))
-        trx_sql = text(_build_trx_query(has_team, False))
-        
-        params = {"date_id": date_id}
-        if has_team:
-            params["team_sk"] = team_sk
-        
-        g = (await conn.execute(gmv_sql, params)).fetchone()
-        t = (await conn.execute(trx_sql, params)).fetchone()
-        
-        gmv = float(g.gmv or 0)
-        trx = int(t.trx or 0)
-        return {"gmv": gmv, "trx": trx, "aov": round(gmv / max(trx, 1), 2)}
-
-
-async def _gmv_trx_range(inicio: int, fin: int, team_sk: str | None) -> dict:
-    has_team = team_sk is not None
-    
-    async with _new_conn() as conn:
-        gmv_sql = text(_build_gmv_query(has_team, True))
-        trx_sql = text(_build_trx_query(has_team, True))
-        
-        params = {"inicio": inicio, "fin": fin}
-        if has_team:
-            params["team_sk"] = team_sk
-        
-        g = (await conn.execute(gmv_sql, params)).fetchone()
-        t = (await conn.execute(trx_sql, params)).fetchone()
-        
-        gmv = float(g.gmv or 0)
-        trx = int(t.trx or 0)
-        return {"gmv": gmv, "trx": trx, "aov": round(gmv / max(trx, 1), 2)}
-
-
-async def _secondary_metric(table: str, column: str, inicio: int, fin: int | None, team_sk: str | None) -> float:
-    has_team = team_sk is not None
-    is_range = fin is not None
-    
-    async with _new_conn() as conn:
-        try:
-            sql = text(_build_secondary_query(table, column, has_team, is_range))
-            
-            params = {"inicio": inicio}
-            if is_range:
-                params["fin"] = fin
-            if has_team:
-                params["team_sk"] = team_sk
-            
-            row = (await conn.execute(sql, params)).fetchone()
-            return float(row.avg_val or 0)
-        except Exception as exc:
-            print(f"[WARN] {table}.{column}: {exc}")
-            return 0.0
-
-
-async def _secondary_all_periods(table: str, column: str, fechas: dict, team_sk: str | None) -> dict:
-    keys = [
-        ("hoy",       fechas["hoy"],            None),
-        ("hoy_sp",    fechas["hoy_sp"],          None),
-        ("ayer",      fechas["ayer"],             None),
-        ("ayer_sp",   fechas["ayer_sp"],          None),
-        ("sem",       fechas["sem_inicio"],       fechas["sem_fin"]),
-        ("sem_pas",   fechas["sem_pas_inicio"],   fechas["sem_pas_fin"]),
-        ("mes",       fechas["mes_inicio"],       fechas["mes_fin"]),
-        ("mes_pas",   fechas["mes_pas_inicio"],   fechas["mes_pas_fin"]),
-    ]
-    values = await asyncio.gather(*[
-        _secondary_metric(table, column, inicio, fin, team_sk)
-        for _, inicio, fin in keys
-    ])
-    return {k: v for (k, _, __), v in zip(keys, values)}
-
-
-async def _monthly_trend(hoy: datetime, team_sk: str | None) -> dict:
-    start_current = datetime(hoy.year - 1, 1, 1)
-    end_current   = hoy
-    start_last    = datetime(hoy.year - 2, 1, 1)
-    end_last      = datetime(hoy.year - 1, hoy.month, min(hoy.day, 28))
-
-    has_team = team_sk is not None
-
-    async def _fetch(start: datetime, end: datetime):
-        async with _new_conn() as conn:
-            sql = text(_build_monthly_trend_query(has_team))
-            
-            params = {
-                "start_date": int(start.strftime("%Y%m%d")),
-                "end_date":   int(end.strftime("%Y%m%d")),
-            }
-            if has_team:
-                params["team_sk"] = team_sk
-            
-            res = await conn.execute(sql, params)
-            return {r.year_month: float(r.gmv or 0) for r in res.fetchall()}
-
-    data_cur, data_last = await asyncio.gather(
-        _fetch(start_current, end_current),
-        _fetch(start_last, end_last),
-    )
-
-    months, ty_vals, ly_vals = [], [], []
-    current = start_current
-    while current <= end_current:
-        ym    = current.strftime("%Y%m")
-        ly_ym = (current - timedelta(days=365)).strftime("%Y%m")
-        months.append(current.strftime("%b %Y"))
-        ty_vals.append(data_cur.get(ym, 0))
-        ly_vals.append(data_last.get(ly_ym, 0))
-        current = (datetime(current.year + 1, 1, 1) if current.month == 12
-                   else datetime(current.year, current.month + 1, 1))
-
-    return {
-        "labels": months,
-        "datasets": [
-            {"label": f"{hoy.year-1}-{hoy.year}", "data": ty_vals,
-             "borderColor": "#3b82f6", "backgroundColor": "rgba(59,130,246,0.1)",
-             "borderWidth": 3, "pointRadius": 4, "tension": 0.3, "fill": True},
-            {"label": f"{hoy.year-2}-{hoy.year-1}", "data": ly_vals,
-             "borderColor": "#94a3b8", "backgroundColor": "rgba(148,163,184,0.1)",
-             "borderWidth": 2, "pointRadius": 3, "tension": 0.3,
-             "borderDash": [5, 5], "fill": False},
-        ],
-    }
-
-
-# =============================================================================
-# FORMATO
-# =============================================================================
-
-def _calc_diff(act, ant):
-    diff = act - ant
-    pct  = round((diff / ant) * 100, 1) if ant > 0 else 0.0
-    return diff, pct
-
-def _fmt_kpi(d, d_sp, nombre, comp, tipo="gmv"):
-    val  = d[tipo]
-    val2 = d_sp[tipo]
-    diff, pct = _calc_diff(val, val2)
-    if tipo in ("gmv", "aov"):
-        return {
-            "nombre": nombre, "comparacion": comp,
-            "valor":      f"${val:,.0f}",
-            "diff_monto": f"+${diff:,.0f}" if diff >= 0 else f"${diff:,.0f}",
-            "diff_pct":   pct,
-            "trend":      "up" if val >= val2 else "down",
-        }
-    return {
-        "nombre": nombre, "comparacion": comp,
-        "valor":      f"{int(val):,}",
-        "diff_monto": f"{int(diff):+,}",
-        "diff_pct":   pct,
-        "trend":      "up" if val >= val2 else "down",
-    }
-
-def _format_trend(data, key_act, key_ant):
-    act  = data[key_act] * 100
-    ant  = data[key_ant] * 100
-    diff = act - ant
-    pct  = (diff / ant * 100) if ant != 0 else 0
-    return {
-        "valor":       f"{act:.2f}%",
-        "comparacion": "vs per. anterior",
-        "diff_monto":  f"{diff:+.2f}%",
-        "diff_pct":    round(abs(pct), 2),
-        "trend":       "up" if act >= ant else "down",
-    }
-
-
-# =============================================================================
+# ============================================================
 # ENDPOINT: Restaurantes
-# =============================================================================
+# ============================================================
 
 @router.get("/restaurants")
 async def restaurants_list():
+    """Lista de restaurantes desde unified_restaurant_map"""
     cache_key = "restaurants_list"
-    cache = None
+    
     try:
         cache = get_cache()
         hit = await cache.get(cache_key)
-        if hit is not None:
+        if hit:
             return hit
     except Exception:
         cache = None
 
-    try:
-        async with _new_conn() as conn:
-            rows = (await conn.execute(text("""
-                SELECT DISTINCT team_sk_n, team_name FROM dim_team
-                WHERE team_name IS NOT NULL ORDER BY team_name
-            """))).fetchall()
-            
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(text("""
+            SELECT unified_team_sk as id, restaurant_name as name, region, city_name
+            FROM unified_restaurant_map
+            WHERE is_active = TRUE
+            ORDER BY restaurant_name
+        """))
+        rows = result.fetchall()
+        
         response = {
             "success": True,
-            "data": [{"id": r.team_sk_n, "name": r.team_name} for r in rows if r.team_name],
+            "data": [{"id": r.id, "name": r.name, "region": r.region, "city": r.city_name} for r in rows]
         }
+        
         if cache:
             await cache.set(cache_key, response, ttl=86400)
         return response
-    except Exception as exc:
-        print(f"[ERROR] restaurants_list: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
-# =============================================================================
-# ENDPOINT: Daily Dashboard
-# =============================================================================
+# ============================================================
+# ENDPOINT: Daily Dashboard (simplificado)
+# ============================================================
 
 @router.get("/dashboard/daily")
 @router.get("/dashboard/ventas")
 async def dashboard_daily(
-    date:       Optional[str] = Query(None),
-    preset:     str           = Query("today"),
-    restaurant: str           = Query("all"),
+    date: Optional[str] = Query(None),
+    preset: str = Query("today"),
+    restaurant: str = Query("all"),
 ):
-    # Validación de fecha
+    """
+    Dashboard diario optimizado - solo lectura de tablas pre-calculadas
+    """
+    # Validar fecha
     try:
         hoy = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
     except ValueError:
-        raise HTTPException(
-            status_code=400, 
-            detail="Formato de fecha inválido. Use YYYY-MM-DD"
-        )
+        raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
     
-    team_sk = None if restaurant == "all" else restaurant
+    hoy_id = date_to_date_id(hoy)
+    unified_team_sk = None if restaurant == "all" else restaurant
 
     # Cache
-    cache_key = hashlib.md5(f"daily:{date}:{preset}:{restaurant}".encode()).hexdigest()
-    cache = None
+    cache_key = hashlib.md5(f"daily:{hoy_id}:{restaurant}".encode()).hexdigest()
     try:
         cache = get_cache()
         hit = await cache.get(cache_key)
-        if hit is not None:
+        if hit:
             return hit
     except Exception:
         cache = None
 
-    try:
-        # Cálculo de fechas
-        ayer           = hoy - timedelta(days=1)
-        inicio_semana  = hoy - timedelta(days=6)
-        inicio_mes     = hoy.replace(day=1)
-        hoy_sp         = hoy - timedelta(days=7)
-        ayer_sp        = ayer - timedelta(days=7)
-        inicio_sem_pas = inicio_semana - timedelta(days=7)
+    async with AsyncSessionLocal() as session:
+        # Calcular fechas de comparación (CORREGIDO: trabajar con datetime, no date_id)
+        ayer = hoy - timedelta(days=1)
+        hoy_sp = hoy - timedelta(days=7)  # Mismo día semana pasada
+        ayer_sp = ayer - timedelta(days=7)
+        
+        # Convertir a date_id después de las operaciones de fecha
+        ayer_id = date_to_date_id(ayer)
+        hoy_sp_id = date_to_date_id(hoy_sp)
+        ayer_sp_id = date_to_date_id(ayer_sp)
+        
+        sem_inicio, sem_fin = get_week_range(hoy_id)
+        sem_pas_inicio, sem_pas_fin = get_week_range(hoy_sp_id)
+        
+        mes_inicio, mes_fin = get_month_range(hoy_id)
+        # Mes pasado
+        mes_pas_date = hoy.replace(day=1) - timedelta(days=1)
+        mes_pas_inicio, mes_pas_fin = get_month_range(date_to_date_id(mes_pas_date))
 
-        try:
-            if hoy.month == 1:
-                inicio_mes_pas = inicio_mes.replace(year=hoy.year-1, month=12)
-                fin_mes_pas    = hoy.replace(year=hoy.year-1, month=12, day=min(hoy.day, 31))
-            else:
-                inicio_mes_pas = inicio_mes.replace(month=inicio_mes.month-1)
-                ultimo_dia     = (inicio_mes - timedelta(days=1)).day
-                fin_mes_pas    = hoy.replace(month=hoy.month-1, day=min(hoy.day, ultimo_dia))
-        except ValueError:
-            inicio_mes_pas = hoy - timedelta(days=60)
-            fin_mes_pas    = hoy - timedelta(days=30)
+        # Query helper: obtener métricas de un día específico
+        async def get_day_metrics(date_id: int):
+            params = {"date_id": date_id}
+            filter_team = ""
+            if unified_team_sk:
+                filter_team = "AND d.unified_team_sk = :team_sk"
+                params["team_sk"] = unified_team_sk
+            
+            sql = text(f"""
+                SELECT 
+                    COALESCE(SUM(gmv), 0) as gmv,
+                    COALESCE(SUM(trx), 0) as trx,
+                    CASE WHEN SUM(trx) > 0 THEN ROUND(SUM(gmv)/SUM(trx), 2) ELSE 0 END as aov,
+                    AVG(COALESCE(b.pct_barquillas_combo, 0)) * 100 as barquilla_pct,
+                    AVG(COALESCE(c.pct_cambio_pz, 0)) * 100 as cambio_pct,
+                    AVG(COALESCE(q.pct_queso, 0)) * 100 as queso_pct,
+                    AVG(COALESCE(g.pct_gde, 0)) * 100 as gde_pct
+                FROM daily_metrics d
+                LEFT JOIN barquilla_combo b ON d.date_id = b.date_id AND d.unified_team_sk = b.unified_team_sk
+                LEFT JOIN cambio_pz c ON d.date_id = c.date_id AND d.unified_team_sk = c.unified_team_sk
+                LEFT JOIN queso_metric q ON d.date_id = q.date_id AND d.unified_team_sk = q.unified_team_sk
+                LEFT JOIN gde_metric g ON d.date_id = g.date_id AND d.unified_team_sk = g.unified_team_sk
+                WHERE d.date_id = :date_id {filter_team}
+            """)
+            row = (await session.execute(sql, params)).fetchone()
+            return {
+                "gmv": float(row.gmv or 0),
+                "trx": int(row.trx or 0),
+                "aov": float(row.aov or 0),
+                "barquilla": float(row.barquilla_pct or 0),
+                "cambio": float(row.cambio_pct or 0),
+                "queso": float(row.queso_pct or 0),
+                "gde": float(row.gde_pct or 0)
+            }
 
-        def di(d): return int(d.strftime("%Y%m%d"))
+        # Query helper: agregar por rango de fechas
+        async def get_range_metrics(start_id: int, end_id: int):
+            params = {"start": start_id, "end": end_id}
+            filter_team = ""
+            if unified_team_sk:
+                filter_team = "AND d.unified_team_sk = :team_sk"
+                params["team_sk"] = unified_team_sk
+            
+            sql = text(f"""
+                SELECT 
+                    COALESCE(SUM(gmv), 0) as gmv,
+                    COALESCE(SUM(trx), 0) as trx,
+                    CASE WHEN SUM(trx) > 0 THEN ROUND(SUM(gmv)/SUM(trx), 2) ELSE 0 END as aov,
+                    AVG(COALESCE(b.pct_barquillas_combo, 0)) * 100 as barquilla_pct,
+                    AVG(COALESCE(c.pct_cambio_pz, 0)) * 100 as cambio_pct,
+                    AVG(COALESCE(q.pct_queso, 0)) * 100 as queso_pct,
+                    AVG(COALESCE(g.pct_gde, 0)) * 100 as gde_pct
+                FROM daily_metrics d
+                LEFT JOIN barquilla_combo b ON d.date_id = b.date_id AND d.unified_team_sk = b.unified_team_sk
+                LEFT JOIN cambio_pz c ON d.date_id = c.date_id AND d.unified_team_sk = c.unified_team_sk
+                LEFT JOIN queso_metric q ON d.date_id = q.date_id AND d.unified_team_sk = q.unified_team_sk
+                LEFT JOIN gde_metric g ON d.date_id = g.date_id AND d.unified_team_sk = g.unified_team_sk
+                WHERE d.date_id BETWEEN :start AND :end {filter_team}
+            """)
+            row = (await session.execute(sql, params)).fetchone()
+            return {
+                "gmv": float(row.gmv or 0),
+                "trx": int(row.trx or 0),
+                "aov": float(row.aov or 0),
+                "barquilla": float(row.barquilla_pct or 0),
+                "cambio": float(row.cambio_pct or 0),
+                "queso": float(row.queso_pct or 0),
+                "gde": float(row.gde_pct or 0)
+            }
 
-        fechas = {
-            "hoy":            di(hoy),
-            "hoy_sp":         di(hoy_sp),
-            "ayer":           di(ayer),
-            "ayer_sp":        di(ayer_sp),
-            "sem_inicio":     di(inicio_semana),
-            "sem_fin":        di(hoy),
-            "sem_pas_inicio": di(inicio_sem_pas),
-            "sem_pas_fin":    di(hoy_sp),
-            "mes_inicio":     di(inicio_mes),
-            "mes_fin":        di(hoy),
-            "mes_pas_inicio": di(inicio_mes_pas),
-            "mes_pas_fin":    di(fin_mes_pas),
-        }
+        # Obtener todas las métricas
+        hoy_m = await get_day_metrics(hoy_id)
+        hoy_sp_m = await get_day_metrics(hoy_sp_id)
+        ayer_m = await get_day_metrics(ayer_id)
+        ayer_sp_m = await get_day_metrics(ayer_sp_id)
+        sem_m = await get_range_metrics(sem_inicio, sem_fin)
+        sem_pas_m = await get_range_metrics(sem_pas_inicio, sem_pas_fin)
+        mes_m = await get_range_metrics(mes_inicio, mes_fin)
+        mes_pas_m = await get_range_metrics(mes_pas_inicio, mes_pas_fin)
 
-        # Ejecutar todas las queries en paralelo
-        (
-            hoy_d, hoy_sp_d, ayer_d, ayer_sp_d,
-            sem_d, sem_pas_d, mes_d, mes_pas_d,
-            barq, cambio, queso, agrand, chart,
-        ) = await asyncio.gather(
-            _gmv_trx_day  (fechas["hoy"],            team_sk),
-            _gmv_trx_day  (fechas["hoy_sp"],         team_sk),
-            _gmv_trx_day  (fechas["ayer"],            team_sk),
-            _gmv_trx_day  (fechas["ayer_sp"],         team_sk),
-            _gmv_trx_range(fechas["sem_inicio"],     fechas["sem_fin"],       team_sk),
-            _gmv_trx_range(fechas["sem_pas_inicio"], fechas["sem_pas_fin"],   team_sk),
-            _gmv_trx_range(fechas["mes_inicio"],     fechas["mes_fin"],       team_sk),
-            _gmv_trx_range(fechas["mes_pas_inicio"], fechas["mes_pas_fin"],   team_sk),
-            _secondary_all_periods("barquilla_combo", "pct_barquillas_combo", fechas, team_sk),
-            _secondary_all_periods("cambio_pz",       "pct_cambio_pz",        fechas, team_sk),
-            _secondary_all_periods("queso_metric",    "pct_queso",            fechas, team_sk),
-            _secondary_all_periods("gde_metric",      "pct_gde",              fechas, team_sk),
-            _monthly_trend(hoy, team_sk),
-        )
+        # Helper para calcular diferencias
+        def calc_diff(current, previous, tipo="gmv"):
+            diff = current - previous
+            pct = round((diff / previous) * 100, 1) if previous > 0 else 0.0
+            return diff, pct
 
-        # Formato de respuesta
-        hoy_sp_str     = hoy_sp.strftime("%d/%m")
-        ayer_sp_str    = ayer_sp.strftime("%d/%m")
-        mes_pasado_str = inicio_mes_pas.strftime("%b %Y")
+        def fmt_kpi(current, previous, nombre, comp, tipo="gmv"):
+            diff, pct = calc_diff(current[tipo], previous[tipo])
+            if tipo in ("gmv", "aov"):
+                return {
+                    "nombre": nombre, "comparacion": comp,
+                    "valor": f"${current[tipo]:,.0f}",
+                    "diff_monto": f"+${diff:,.0f}" if diff >= 0 else f"${diff:,.0f}",
+                    "diff_pct": pct,
+                    "trend": "up" if current[tipo] >= previous[tipo] else "down",
+                }
+            return {
+                "nombre": nombre, "comparacion": comp,
+                "valor": f"{int(current[tipo]):,}",
+                "diff_monto": f"{int(diff):+,}",
+                "diff_pct": pct,
+                "trend": "up" if current[tipo] >= previous[tipo] else "down",
+            }
 
-        def periodos_kpi(tipo):
-            return [
-                _fmt_kpi(hoy_d,  hoy_sp_d,  "Hoy",    f"vs {hoy_sp_str}",    tipo),
-                _fmt_kpi(ayer_d, ayer_sp_d, "Ayer",   f"vs {ayer_sp_str}",   tipo),
-                _fmt_kpi(sem_d,  sem_pas_d, "Semana", "vs semana pasada",     tipo),
-                _fmt_kpi(mes_d,  mes_pas_d, "Mes",    f"vs {mes_pasado_str}", tipo),
-            ]
+        def fmt_sec(current, previous, nombre):
+            diff = current - previous
+            pct = (diff / previous * 100) if previous != 0 else 0
+            return {
+                "nombre": nombre,
+                "valor": f"{current:.2f}%",
+                "comparacion": "vs per. anterior",
+                "diff_monto": f"{diff:+.2f}%",
+                "diff_pct": round(abs(pct), 2),
+                "trend": "up" if current >= previous else "down",
+            }
 
-        def periodos_sec(data):
-            return [
-                {"nombre": "Hoy",    **_format_trend(data, "hoy",  "hoy_sp")},
-                {"nombre": "Ayer",   **_format_trend(data, "ayer", "ayer_sp")},
-                {"nombre": "Semana", **_format_trend(data, "sem",  "sem_pas")},
-                {"nombre": "Mes",    **_format_trend(data, "mes",  "mes_pas")},
-            ]
+        # Formatear respuesta
+        hoy_sp_str = hoy_sp.strftime("%d/%m")
+        ayer_sp_str = ayer_sp.strftime("%d/%m")
+        mes_pasado_str = mes_pas_date.strftime("%b %Y")
 
         result = {
             "success": True,
@@ -436,194 +262,226 @@ async def dashboard_daily(
             },
             "data": {
                 "kpis": [
-                    {"id": "gmv",  "title": "GMV (Ingresos)",       "icon": "fas fa-dollar-sign", "color": "green",  "periodos": periodos_kpi("gmv")},
-                    {"id": "trx",  "title": "TRX (Órdenes)",        "icon": "fas fa-receipt",     "color": "blue",   "periodos": periodos_kpi("trx")},
-                    {"id": "aov",  "title": "AOV (Ticket Promedio)", "icon": "fas fa-calculator",  "color": "purple", "periodos": periodos_kpi("aov")},
+                    {
+                        "id": "gmv",
+                        "title": "GMV (Ingresos)",
+                        "icon": "fas fa-dollar-sign",
+                        "color": "green",
+                        "periodos": [
+                            fmt_kpi(hoy_m, hoy_sp_m, "Hoy", f"vs {hoy_sp_str}", "gmv"),
+                            fmt_kpi(ayer_m, ayer_sp_m, "Ayer", f"vs {ayer_sp_str}", "gmv"),
+                            fmt_kpi(sem_m, sem_pas_m, "Semana", "vs semana pasada", "gmv"),
+                            fmt_kpi(mes_m, mes_pas_m, "Mes", f"vs {mes_pasado_str}", "gmv"),
+                        ]
+                    },
+                    {
+                        "id": "trx",
+                        "title": "TRX (Órdenes)",
+                        "icon": "fas fa-receipt",
+                        "color": "blue",
+                        "periodos": [
+                            fmt_kpi(hoy_m, hoy_sp_m, "Hoy", f"vs {hoy_sp_str}", "trx"),
+                            fmt_kpi(ayer_m, ayer_sp_m, "Ayer", f"vs {ayer_sp_str}", "trx"),
+                            fmt_kpi(sem_m, sem_pas_m, "Semana", "vs semana pasada", "trx"),
+                            fmt_kpi(mes_m, mes_pas_m, "Mes", f"vs {mes_pasado_str}", "trx"),
+                        ]
+                    },
+                    {
+                        "id": "aov",
+                        "title": "AOV (Ticket Promedio)",
+                        "icon": "fas fa-calculator",
+                        "color": "purple",
+                        "periodos": [
+                            fmt_kpi(hoy_m, hoy_sp_m, "Hoy", f"vs {hoy_sp_str}", "aov"),
+                            fmt_kpi(ayer_m, ayer_sp_m, "Ayer", f"vs {ayer_sp_str}", "aov"),
+                            fmt_kpi(sem_m, sem_pas_m, "Semana", "vs semana pasada", "aov"),
+                            fmt_kpi(mes_m, mes_pas_m, "Mes", f"vs {mes_pasado_str}", "aov"),
+                        ]
+                    },
                 ],
                 "secondary_metrics": [
-                    {"id": "barquilla", "title": "Barquilla Extra",  "icon": "fas fa-cookie",            "color": "orange", "periodos": periodos_sec(barq)},
-                    {"id": "cambio",    "title": "Cambio de Pieza",  "icon": "fas fa-exchange-alt",      "color": "cyan",   "periodos": periodos_sec(cambio)},
-                    {"id": "queso",     "title": "Queso Extra",      "icon": "fas fa-cheese",            "color": "yellow", "periodos": periodos_sec(queso)},
-                    {"id": "agrandado", "title": "Agrandado",        "icon": "fas fa-expand-arrows-alt", "color": "red",    "periodos": periodos_sec(agrand)},
+                    {
+                        "id": "barquilla",
+                        "title": "Barquilla Extra",
+                        "icon": "fas fa-cookie",
+                        "color": "orange",
+                        "periodos": [
+                            fmt_sec(hoy_m["barquilla"], hoy_sp_m["barquilla"], "Hoy"),
+                            fmt_sec(ayer_m["barquilla"], ayer_sp_m["barquilla"], "Ayer"),
+                            fmt_sec(sem_m["barquilla"], sem_pas_m["barquilla"], "Semana"),
+                            fmt_sec(mes_m["barquilla"], mes_pas_m["barquilla"], "Mes"),
+                        ]
+                    },
+                    {
+                        "id": "cambio",
+                        "title": "Cambio de Pieza",
+                        "icon": "fas fa-exchange-alt",
+                        "color": "cyan",
+                        "periodos": [
+                            fmt_sec(hoy_m["cambio"], hoy_sp_m["cambio"], "Hoy"),
+                            fmt_sec(ayer_m["cambio"], ayer_sp_m["cambio"], "Ayer"),
+                            fmt_sec(sem_m["cambio"], sem_pas_m["cambio"], "Semana"),
+                            fmt_sec(mes_m["cambio"], mes_pas_m["cambio"], "Mes"),
+                        ]
+                    },
+                    {
+                        "id": "queso",
+                        "title": "Queso Extra",
+                        "icon": "fas fa-cheese",
+                        "color": "yellow",
+                        "periodos": [
+                            fmt_sec(hoy_m["queso"], hoy_sp_m["queso"], "Hoy"),
+                            fmt_sec(ayer_m["queso"], ayer_sp_m["queso"], "Ayer"),
+                            fmt_sec(sem_m["queso"], sem_pas_m["queso"], "Semana"),
+                            fmt_sec(mes_m["queso"], mes_pas_m["queso"], "Mes"),
+                        ]
+                    },
+                    {
+                        "id": "agrandado",
+                        "title": "Agrandado",
+                        "icon": "fas fa-expand-arrows-alt",
+                        "color": "red",
+                        "periodos": [
+                            fmt_sec(hoy_m["gde"], hoy_sp_m["gde"], "Hoy"),
+                            fmt_sec(ayer_m["gde"], ayer_sp_m["gde"], "Ayer"),
+                            fmt_sec(sem_m["gde"], sem_pas_m["gde"], "Semana"),
+                            fmt_sec(mes_m["gde"], mes_pas_m["gde"], "Mes"),
+                        ]
+                    },
                 ],
-                "charts": [{"title": "Tendencia Mensual - Facturación", "type": "line", "data": chart}],
+                "charts": []  # Pendiente: tendencias mensuales
             },
         }
 
         if cache:
-            try: 
+            try:
                 await cache.set(cache_key, result, ttl=300)
-            except Exception: 
+            except Exception:
                 pass
 
         return result
 
-    except Exception as exc:
-        print(f"[ERROR] dashboard_daily: {exc}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail={
-            "error": str(exc), "traceback": traceback.format_exc()
-        })
 
-
-# =============================================================================
-# ENDPOINT: Detalle de Restaurantes
-# =============================================================================
+# ============================================================
+# ENDPOINT: Detalle de Restaurantes (tabla comparativa)
+# ============================================================
 
 @router.get("/dashboard/restaurants")
 async def dashboard_restaurants(
-    start_date:  str       = Query(...),
-    end_date:    str       = Query(...),
+    start_date: str = Query(...),
+    end_date: str = Query(...),
     restaurants: list[str] = Query(default=["all"]),
 ):
-    # Validación de fechas
+    """
+    Tabla comparativa de restaurantes en un rango de fechas
+    """
     try:
         date_start = int(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d"))
-        date_end   = int(datetime.strptime(end_date,   "%Y-%m-%d").strftime("%Y%m%d"))
+        date_end = int(datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d"))
     except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Formato de fecha inválido. Use YYYY-MM-DD"
-        )
+        raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
 
-    _rkey     = ":".join(sorted(restaurants))
-    cache_key = hashlib.md5(f"restaurants:{start_date}:{end_date}:{_rkey}".encode()).hexdigest()
-    cache = None
+    cache_key = hashlib.md5(f"restaurants:{date_start}:{date_end}:{':'.join(sorted(restaurants))}".encode()).hexdigest()
+    
     try:
         cache = get_cache()
         hit = await cache.get(cache_key)
-        if hit is not None:
+        if hit:
             return hit
     except Exception:
         cache = None
 
-    try:
-        use_all     = not restaurants or "all" in restaurants
-        rest_filter = "" if use_all else "AND dt.team_sk_n = ANY(:restaurants)"
-        params: dict = {"start_date": date_start, "end_date": date_end}
-        if not use_all:
+    async with AsyncSessionLocal() as session:
+        # Filtro de restaurantes
+        restaurant_filter = ""
+        params = {"start": date_start, "end": date_end}
+        
+        if restaurants and "all" not in restaurants:
+            restaurant_filter = "AND d.unified_team_sk = ANY(:restaurants)"
             params["restaurants"] = restaurants
 
-        sql_main = text(f"""
-            SELECT dt.team_name AS restaurant,
-                SUM(CASE
-                    WHEN fol.date_id < 20250601 THEN
-                        CASE WHEN dp.group_name ILIKE '%%Delivery%%' OR dp.group_name ILIKE '%%IGTF%%'
-                             THEN 0.0 ELSE fol.price_subtotal_usd END
-                    ELSE fol.price_subtotal_usd
-                END) AS gmv,
-                COUNT(DISTINCT fol.order_sk_n) AS trx
-            FROM fact_order_line fol
-            LEFT JOIN dim_product dp ON fol.product_sk_n = dp.product_sk_n
-            LEFT JOIN dim_team dt    ON fol.team_sk = dt.team_sk_n
-            WHERE fol.date_id BETWEEN :start_date AND :end_date
-            {rest_filter}
-            GROUP BY dt.team_name
-            HAVING SUM(CASE
-                WHEN fol.date_id < 20250601 THEN
-                    CASE WHEN dp.group_name ILIKE '%%Delivery%%' OR dp.group_name ILIKE '%%IGTF%%'
-                         THEN 0.0 ELSE fol.price_subtotal_usd END
-                ELSE fol.price_subtotal_usd
-            END) > 0
-            ORDER BY gmv DESC
+        # Query principal simplificada
+        sql = text(f"""
+            SELECT 
+                r.restaurant_name as restaurant,
+                SUM(d.gmv) as gmv,
+                SUM(d.trx) as trx,
+                CASE WHEN SUM(d.trx) > 0 THEN ROUND(SUM(d.gmv)/SUM(d.trx), 2) ELSE 0 END as aov,
+                AVG(COALESCE(b.pct_barquillas_combo, 0)) * 100 as barquilla_pct,
+                AVG(COALESCE(c.pct_cambio_pz, 0)) * 100 as cambio_pct,
+                AVG(COALESCE(q.pct_queso, 0)) * 100 as queso_pct,
+                AVG(COALESCE(g.pct_gde, 0)) * 100 as gde_pct
+            FROM daily_metrics d
+            JOIN unified_restaurant_map r ON d.unified_team_sk = r.unified_team_sk
+            LEFT JOIN barquilla_combo b ON d.date_id = b.date_id AND d.unified_team_sk = b.unified_team_sk
+            LEFT JOIN cambio_pz c ON d.date_id = c.date_id AND d.unified_team_sk = c.unified_team_sk
+            LEFT JOIN queso_metric q ON d.date_id = q.date_id AND d.unified_team_sk = q.unified_team_sk
+            LEFT JOIN gde_metric g ON d.date_id = g.date_id AND d.unified_team_sk = g.unified_team_sk
+            WHERE d.date_id BETWEEN :start AND :end
+            {restaurant_filter}
+            GROUP BY r.restaurant_name
+            HAVING SUM(d.gmv) > 0
+            ORDER BY SUM(d.gmv) DESC
         """)
+        
+        result = await session.execute(sql, params)
+        rows = result.fetchall()
 
-        sql_sec = text(f"""
-            SELECT dt.team_name AS restaurant,
-                AVG(bc.pct_barquillas_combo) AS barquilla,
-                AVG(cp.pct_cambio_pz)        AS cambio,
-                AVG(qm.pct_queso)            AS queso,
-                AVG(gm.pct_gde)              AS agrandado
-            FROM dim_team dt
-            LEFT JOIN barquilla_combo bc ON dt.team_sk_n = bc.team_sk AND bc.date_id BETWEEN :start_date AND :end_date
-            LEFT JOIN cambio_pz       cp ON dt.team_sk_n = cp.team_sk AND cp.date_id BETWEEN :start_date AND :end_date
-            LEFT JOIN queso_metric    qm ON dt.team_sk_n = qm.team_sk AND qm.date_id BETWEEN :start_date AND :end_date
-            LEFT JOIN gde_metric      gm ON dt.team_sk_n = gm.team_sk AND gm.date_id BETWEEN :start_date AND :end_date
-            WHERE EXISTS (
-                SELECT 1 FROM fact_order_line fol
-                WHERE fol.team_sk = dt.team_sk_n
-                AND fol.date_id BETWEEN :start_date AND :end_date
-            )
-            {rest_filter}
-            GROUP BY dt.team_name
-        """)
-
-        async with _new_conn() as conn:
-            rows_main = (await conn.execute(sql_main, params)).fetchall()
-            rows_sec  = (await conn.execute(sql_sec,  params)).fetchall()
-
-        # ✅ CORREGIDO: Convertir Decimal a float en el mapeo
-        sec_map = {
-            r.restaurant: {
-                "barquilla": float(r.barquilla or 0) * 100,
-                "cambio":    float(r.cambio    or 0) * 100,
-                "queso":     float(r.queso     or 0) * 100,
-                "agrandado": float(r.agrandado or 0) * 100,
-            }
-            for r in rows_sec
+        # Calcular totales
+        total_gmv = sum(float(r.gmv or 0) for r in rows)
+        total_trx = sum(int(r.trx or 0) for r in rows)
+        
+        totals_sec = {
+            "barquilla": sum(float(r.barquilla_pct or 0) for r in rows),
+            "cambio": sum(float(r.cambio_pct or 0) for r in rows),
+            "queso": sum(float(r.queso_pct or 0) for r in rows),
+            "gde": sum(float(r.gde_pct or 0) for r in rows)
         }
+        count = len(rows)
 
         table_data = []
-        total_gmv = total_trx = 0.0
-        # ✅ CORREGIDO: Inicializar como float, no como 0.0 (ya era float, pero ahora sec_map también tiene floats)
-        totals = {"barquilla": 0.0, "cambio": 0.0, "queso": 0.0, "agrandado": 0.0}
-        count  = 0
-
-        for row in rows_main:
+        for row in rows:
             gmv = float(row.gmv or 0)
             trx = int(row.trx or 0)
-            aov = round(gmv / max(trx, 1), 2)
-            sec = sec_map.get(row.restaurant, {k: 0.0 for k in totals})
-            total_gmv += gmv
-            total_trx += trx
-            # ✅ Ahora ambos son float, no hay problema
-            for k in totals:
-                totals[k] += sec[k]
-            count += 1
+            aov = float(row.aov or 0)
             table_data.append({
                 "restaurant": row.restaurant,
-                "gmv":        f"${gmv:,.2f}",
-                "trx":        f"{trx:,}",
-                "aov":        f"${aov:,.2f}",
-                "barquilla":  f"{sec['barquilla']:.2f}%",
-                "cambio":     f"{sec['cambio']:.2f}%",
-                "queso":      f"{sec['queso']:.2f}%",
-                "agrandado":  f"{sec['agrandado']:.2f}%",
+                "gmv": f"${gmv:,.2f}",
+                "trx": f"{trx:,}",
+                "aov": f"${aov:,.2f}",
+                "barquilla": f"{float(row.barquilla_pct or 0):.2f}%",
+                "cambio": f"{float(row.cambio_pct or 0):.2f}%",
+                "queso": f"{float(row.queso_pct or 0):.2f}%",
+                "agrandado": f"{float(row.gde_pct or 0):.2f}%",
             })
 
+        # Fila de totales
         if count > 0:
             avg_aov = round(total_gmv / max(total_trx, 1), 2)
             table_data.append({
                 "restaurant": "** TOTAL **",
-                "gmv":        f"${total_gmv:,.2f}",
-                "trx":        f"{int(total_trx):,}",
-                "aov":        f"${avg_aov:,.2f}",
-                "barquilla":  f"{totals['barquilla']/count:.2f}%",
-                "cambio":     f"{totals['cambio']/count:.2f}%",
-                "queso":      f"{totals['queso']/count:.2f}%",
-                "agrandado":  f"{totals['agrandado']/count:.2f}%",
-                "isTotal":    True,
+                "gmv": f"${total_gmv:,.2f}",
+                "trx": f"{int(total_trx):,}",
+                "aov": f"${avg_aov:,.2f}",
+                "barquilla": f"{totals_sec['barquilla']/count:.2f}%",
+                "cambio": f"{totals_sec['cambio']/count:.2f}%",
+                "queso": f"{totals_sec['queso']/count:.2f}%",
+                "agrandado": f"{totals_sec['gde']/count:.2f}%",
+                "isTotal": True,
             })
 
-        result = {
+        response = {
             "success": True,
             "data": {
-                "table":  table_data,
+                "table": table_data,
                 "period": {"start": start_date, "end": end_date},
             },
         }
 
         if cache:
-            try: 
-                await cache.set(cache_key, result, ttl=300)
-            except Exception: 
+            try:
+                await cache.set(cache_key, response, ttl=300)
+            except Exception:
                 pass
 
-        return result
-
-    except Exception as exc:
-        print(f"[ERROR] dashboard_restaurants: {exc}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail={
-            "error": str(exc), "traceback": traceback.format_exc()
-        })
+        return response
