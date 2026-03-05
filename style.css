@@ -1274,3 +1274,82 @@ h1, h2, h3, h4, h5, h6 {
         min-width: 100px;
     }
 }
+/* ============================================================
+   VENTAS POR HORA - ESTILOS ADICIONALES
+   ============================================================ */
+
+.hours-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.hours-chart-section {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.hours-table-section {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.section-subtitle {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 0 0 1rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.section-subtitle i {
+    color: #6d28d9;
+}
+
+.period-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.hours-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.hours-table th {
+    background: #f5f3ff;
+    color: #5b21b6;
+}
+
+.hours-table td {
+    padding: 1.25rem 1rem;
+}
+
+/* Colores específicos para períodos en la tabla */
+.hours-table tr[style*="border-left: 4px solid #f59e0b"] {
+    background: linear-gradient(90deg, #fffbeb 0%, #ffffff 100%);
+}
+
+.hours-table tr[style*="border-left: 4px solid #3b82f6"] {
+    background: linear-gradient(90deg, #eff6ff 0%, #ffffff 100%);
+}
+
+.hours-table tr[style*="border-left: 4px solid #10b981"] {
+    background: linear-gradient(90deg, #ecfdf5 0%, #ffffff 100%);
+}
+
+.hours-table tr[style*="border-left: 4px solid #8b5cf6"] {
+    background: linear-gradient(90deg, #f5f3ff 0%, #ffffff 100%);
+}

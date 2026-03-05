@@ -53,7 +53,8 @@ const Sidebar = {
         return {
             allDashboards: [
                 { id: 'daily', name: 'Daily Sales', icon: 'fas fa-calendar-day' },
-                { id: 'productmix', name: 'Product Mix', icon: 'fas fa-chart-pie' }
+                { id: 'productmix', name: 'Product Mix', icon: 'fas fa-chart-pie' },
+                { id: 'hours', name: 'Ventas por Hora', icon: 'fas fa-clock' }
             ]
         }
     },

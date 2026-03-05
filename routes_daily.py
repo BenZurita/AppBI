@@ -608,3 +608,200 @@ async def dashboard_product_mix(
                 pass
 
         return response
+    # ============================================================
+# ENDPOINT: Ventas por Hora (con períodos del día)
+# ============================================================
+
+@router.get("/dashboard/hours")
+async def dashboard_hours(
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    restaurant: str = Query("all"),
+    restaurant_filter: RestaurantFilter = None
+):
+    """
+    Ventas por Hora: Análisis de ventas por período del día
+    Períodos: Almuerzo (11-15), Media Tarde (15-18), Cena (18-22), Late Night (22-01)
+    """
+    # Aplicar filtro de seguridad
+    effective_restaurant = restaurant
+    if restaurant_filter:
+        if not restaurant_filter["can_view_all"]:
+            effective_restaurant = restaurant_filter["restaurant_filter"]
+            print(f"[DEBUG] Hours restricted to: {effective_restaurant}")
+        else:
+            print(f"[DEBUG] Admin Hours, restaurant: {restaurant}")
+    
+    try:
+        date_start = int(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d"))
+        date_end = int(datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d"))
+    except ValueError:
+        raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
+
+    cache_key = hashlib.md5(f"hours:{date_start}:{date_end}:{effective_restaurant}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
+    
+    try:
+        cache = get_cache()
+        hit = await cache.get(cache_key)
+        if hit:
+            return hit
+    except Exception:
+        cache = None
+
+    async with AsyncSessionLocal() as session:
+        restaurant_filter_sql = ""
+        params = {"start": date_start, "end": date_end}
+        
+        if effective_restaurant and effective_restaurant != "all":
+            restaurant_filter_sql = "AND sh.unified_team_sk = :restaurant"
+            params["restaurant"] = effective_restaurant
+
+        # Query: Datos por hora para el gráfico de líneas
+        hourly_sql = text(f"""
+            SELECT 
+                sh.hora,
+                SUM(sh.total_ordenes) AS total_ordenes,
+                SUM(sh.total_ventas_usd) AS total_ventas_usd
+            FROM sales_by_hour sh
+            WHERE sh.date_id BETWEEN :start AND :end
+            {restaurant_filter_sql}
+            GROUP BY sh.hora
+            ORDER BY sh.hora
+        """)
+        
+        hourly_result = await session.execute(hourly_sql, params)
+        hourly_rows = hourly_result.fetchall()
+
+        # Query: Datos agregados por período para la tabla
+                # Query: Datos agregados por período para la tabla
+        period_sql = text(f"""
+            WITH period_data AS (
+                SELECT 
+                    CASE 
+                        WHEN sh.hora >= 11 AND sh.hora < 15 THEN 'Almuerzo'
+                        WHEN sh.hora >= 15 AND sh.hora < 18 THEN 'Media Tarde'
+                        WHEN sh.hora >= 18 AND sh.hora < 22 THEN 'Cena'
+                        WHEN sh.hora >= 22 OR sh.hora < 1 THEN 'Late Night'
+                        ELSE 'Otro'
+                    END AS periodo,
+                    sh.total_ordenes,
+                    sh.total_ventas_usd,
+                    sh.date_id
+                FROM sales_by_hour sh
+                WHERE sh.date_id BETWEEN :start AND :end
+                {restaurant_filter_sql}
+            )
+            SELECT 
+                periodo,
+                SUM(total_ordenes) AS total_ordenes,
+                SUM(total_ventas_usd) AS total_ventas_usd,
+                COUNT(DISTINCT date_id) AS dias_con_ventas
+            FROM period_data
+            WHERE periodo != 'Otro'
+            GROUP BY periodo
+            ORDER BY 
+                CASE periodo
+                    WHEN 'Almuerzo' THEN 1
+                    WHEN 'Media Tarde' THEN 2
+                    WHEN 'Cena' THEN 3
+                    WHEN 'Late Night' THEN 4
+                END
+        """)
+        
+        period_result = await session.execute(period_sql, params)
+        period_rows = period_result.fetchall()
+
+        # Preparar datos para gráfico de líneas (todas las horas 0-23)
+        hours_chart = []
+        sales_chart = []
+        orders_chart = []
+        
+        # Crear mapa de horas existentes
+        hourly_map = {row.hora: row for row in hourly_rows}
+        
+        for h in range(24):
+            row = hourly_map.get(h)
+            hours_chart.append(f"{h:02d}:00")
+            sales_chart.append(float(row.total_ventas_usd) if row else 0)
+            orders_chart.append(int(row.total_ordenes) if row else 0)
+
+        # Preparar datos de períodos para tabla
+        period_data = []
+        total_ordenes_all = 0
+        total_ventas_all = 0
+        
+        period_colors = {
+            'Almuerzo': '#f59e0b',      # Naranja
+            'Media Tarde': '#3b82f6',   # Azul
+            'Cena': '#10b981',          # Verde
+            'Late Night': '#8b5cf6'     # Púrpura
+        }
+        
+        for row in period_rows:
+            ordenes = int(row.total_ordenes or 0)
+            ventas = float(row.total_ventas_usd or 0)
+            dias = int(row.dias_con_ventas or 0)
+            
+            total_ordenes_all += ordenes
+            total_ventas_all += ventas
+            
+            period_data.append({
+                "periodo": row.periodo,
+                "horario": get_period_hours(row.periodo),
+                "total_ordenes": ordenes,
+                "total_ventas_usd": round(ventas, 2),
+                "promedio_diario": round(ventas / max(dias, 1), 2),
+                "color": period_colors.get(row.periodo, '#6b7280'),
+                "dias": dias
+            })
+
+        # Calcular porcentajes de período
+        for p in period_data:
+            p['pct_del_total'] = round((p['total_ventas_usd'] / total_ventas_all) * 100, 1) if total_ventas_all > 0 else 0
+
+        # Fila de totales
+        if period_data:
+            total_dias = max(p['dias'] for p in period_data)
+            period_data.append({
+                "periodo": "** TOTAL **",
+                "horario": "",
+                "total_ordenes": total_ordenes_all,
+                "total_ventas_usd": round(total_ventas_all, 2),
+                "promedio_diario": round(total_ventas_all / max(total_dias, 1), 2),
+                "pct_del_total": 100.0,
+                "color": "#1e293b",
+                "isTotal": True
+            })
+
+        response = {
+            "success": True,
+            "data": {
+                "chart": {
+                    "hours": hours_chart,
+                    "sales": sales_chart,
+                    "orders": orders_chart
+                },
+                "periods_table": period_data,
+                "period": {"start": start_date, "end": end_date},
+                "restaurant_filter": effective_restaurant
+            },
+        }
+
+        if cache:
+            try:
+                await cache.set(cache_key, response, ttl=300)
+            except Exception:
+                pass
+
+        return response
+
+
+def get_period_hours(periodo: str) -> str:
+    """Retorna el rango de horas para cada período"""
+    horarios = {
+        'Almuerzo': '11:00 - 15:00',
+        'Media Tarde': '15:00 - 18:00',
+        'Cena': '18:00 - 22:00',
+        'Late Night': '22:00 - 01:00'
+    }
+    return horarios.get(periodo, '')

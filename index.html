@@ -14,7 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=3">
+    <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
     <div id="app">
@@ -100,8 +100,8 @@
                     </div>
                 </div>
 
-                <!-- FILTROS PRODUCT MIX -->
-                <div v-if="currentDashboard === 'productmix'" class="table-filters-panel">
+                <!-- FILTROS PRODUCT MIX Y HORAS (comparten diseño) -->
+                <div v-if="currentDashboard === 'productmix' || currentDashboard === 'hours'" class="table-filters-panel">
                     <div class="filter-section">
                         <h4 class="filter-title">
                             <i class="fas fa-filter"></i>
@@ -157,11 +157,11 @@
                 </div>
 
                 <!-- Mensaje informativo para usuarios de restaurante -->
-                <div v-if="currentDashboard === 'productmix' && !isAdmin" class="table-filters-panel" style="background: #dbeafe; border-left: 4px solid #3b82f6;">
+                <div v-if="(currentDashboard === 'productmix' || currentDashboard === 'hours') && !isAdmin" class="table-filters-panel" style="background: #dbeafe; border-left: 4px solid #3b82f6;">
                     <div style="display: flex; align-items: center; gap: 0.75rem; color: #1e40af;">
                         <i class="fas fa-info-circle" style="font-size: 1.25rem;"></i>
                         <div>
-                            <strong>Mi Product Mix</strong>
+                            <strong>{{ currentDashboard === 'hours' ? 'Mis Ventas por Hora' : 'Mi Product Mix' }}</strong>
                             <p style="margin: 0; font-size: 0.875rem;">Visualizando datos de: {{ userRestaurantName || ('Restaurante ' + unifiedTeamSk) }}</p>
                         </div>
                     </div>
@@ -175,16 +175,18 @@
                     :table-data="tableData"
                     :table-columns="tableColumns"
                     :is-table-mode="currentDashboard === 'productmix'"
+                    :is-hours-mode="currentDashboard === 'hours'"
+                    :hours-data="hoursData"
                     :loading="loading">
                 </dashboard-grid>
             </main>
         </div>
     </div>
 
-    <script src="KPICard.js?v=3"></script>
-    <script src="DashboardGrid.js?v=3"></script>
-    <script src="sidebar.js?v=3"></script>
-    <script src="API.js?v=3"></script>
+    <script src="KPICard.js?v=4"></script>
+    <script src="DashboardGrid.js?v=4"></script>
+    <script src="sidebar.js?v=4"></script>
+    <script src="API.js?v=4"></script>
     
 <script>
 const { createApp } = Vue;
@@ -234,16 +236,7 @@ createApp({
             secondaryMetrics: [],
             charts: [],
             
-            selectedDate: todayStr,
-            datePreset: 'today',
-            restaurants: [],
-            selectedRestaurant: isUserAdmin ? 'all' : (userTeamSk || 'all'),
-            
-            tableStartDate: startOfYear,
-            tableEndDate: todayStr,
-            tableRestaurants: isUserAdmin ? ['all'] : (userTeamSk ? [userTeamSk] : ['all']),
-            showRestaurantDropdown: false,
-            
+            // Datos para Product Mix
             tableData: [],
             tableColumns: [
                 { key: 'product_name', label: 'Producto' },
@@ -252,6 +245,20 @@ createApp({
                 { key: 'total_usd', label: 'Ventas (USD)' },
                 { key: 'pct_weight', label: '% del Mix' }
             ],
+            
+            // Datos para Horas
+            hoursData: {
+                chart: null,
+                periods: []
+            },
+            
+            selectedDate: todayStr,
+            datePreset: 'today',
+            restaurants: [],
+            selectedRestaurant: isUserAdmin ? 'all' : (userTeamSk || 'all'),
+            
+            tableStartDate: startOfYear,
+            tableEndDate: todayStr,
             
             currentDate: today.toLocaleDateString('es-ES', { 
                 weekday: 'long', 
@@ -265,7 +272,8 @@ createApp({
         dashboardTitle() {
             const titles = {
                 'daily': 'Daily Sales',
-                'productmix': 'Product Mix'
+                'productmix': 'Product Mix',
+                'hours': 'Ventas por Hora'
             };
             return titles[this.currentDashboard] || 'Dashboard';
         },
@@ -282,25 +290,6 @@ createApp({
             if (this.datePreset === 'today') return 'Hoy';
             if (this.datePreset === 'yesterday') return 'Ayer';
             return this.formatDisplayDate(this.selectedDate);
-        },
-        
-        tablePeriodLabel() {
-            return `${this.formatDisplayDate(this.tableStartDate)} - ${this.formatDisplayDate(this.tableEndDate)}`;
-        },
-        
-        isAllSelected() {
-            return this.tableRestaurants.includes('all') || this.tableRestaurants.length === this.restaurants.length;
-        },
-        
-        selectedRestaurantsText() {
-            if (this.tableRestaurants.includes('all') || this.tableRestaurants.length === 0) {
-                return 'Todos los restaurantes';
-            }
-            if (this.tableRestaurants.length === 1) {
-                const rest = this.restaurants.find(r => r.id === this.tableRestaurants[0]);
-                return rest ? rest.name : '1 seleccionado';
-            }
-            return `${this.tableRestaurants.length} restaurantes seleccionados`;
         }
     },
     mounted() {
@@ -334,7 +323,6 @@ createApp({
         
         if (!this.isAdmin && hasTeamSk) {
             this.selectedRestaurant = currentTeamSk;
-            this.tableRestaurants = [currentTeamSk];
             console.log('[DEBUG] Configured restaurant:', currentTeamSk);
         }
         
@@ -361,7 +349,6 @@ createApp({
         },
         
         async changeDashboard(dashboardId) {
-            // Ya no bloqueamos a restaurantes - todos pueden ver Product Mix
             this.currentDashboard = dashboardId;
             await this.loadDashboardData();
         },
@@ -427,36 +414,7 @@ createApp({
         },
         
         async applyTableFilter() {
-            if (!this.isAdmin) {
-                this.tableRestaurants = [this.unifiedTeamSk];
-            }
-            if (this.currentDashboard === 'productmix') {
-                await this.loadDashboardData();
-            }
-        },
-        
-        toggleRestaurant(restId) {
-            if (this.tableRestaurants.includes('all')) {
-                this.tableRestaurants = [restId];
-            } else {
-                const index = this.tableRestaurants.indexOf(restId);
-                if (index > -1) {
-                    this.tableRestaurants.splice(index, 1);
-                    if (this.tableRestaurants.length === 0) {
-                        this.tableRestaurants = ['all'];
-                    }
-                } else {
-                    this.tableRestaurants.push(restId);
-                }
-            }
-        },
-        
-        toggleAllRestaurants() {
-            if (this.isAllSelected) {
-                this.tableRestaurants = [];
-            } else {
-                this.tableRestaurants = ['all'];
-            }
+            await this.loadDashboardData();
         },
         
         async loadDashboardData() {
@@ -473,6 +431,22 @@ createApp({
                     const response = await apiService.getDashboardData('productmix', params);
                     const data = response.data || response;
                     this.tableData = data.table || [];
+                    
+                } else if (this.currentDashboard === 'hours') {
+                    const params = {
+                        start_date: this.tableStartDate,
+                        end_date: this.tableEndDate,
+                        restaurant: this.isAdmin ? this.selectedRestaurant : this.unifiedTeamSk
+                    };
+                    
+                    console.log('[DEBUG] Loading Hours with params:', params);
+                    const response = await apiService.getDashboardData('hours', params);
+                    const data = response.data || response;
+                    
+                    this.hoursData = {
+                        chart: data.chart || null,
+                        periods: data.periods_table || []
+                    };
                     
                 } else {
                     const params = {
@@ -492,6 +466,8 @@ createApp({
                 console.error('Error cargando datos:', error);
                 if (this.currentDashboard === 'productmix') {
                     this.tableData = [];
+                } else if (this.currentDashboard === 'hours') {
+                    this.hoursData = { chart: null, periods: [] };
                 } else {
                     this.kpis = [];
                     this.secondaryMetrics = [];

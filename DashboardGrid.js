@@ -2,12 +2,13 @@ const DashboardGrid = {
     components: {
         'kpi-card': KPICard
     },
-    props: ['kpis', 'secondaryMetrics', 'charts', 'loading', 'tableData', 'tableColumns', 'isTableMode'],
+    props: ['kpis', 'secondaryMetrics', 'charts', 'loading', 'tableData', 'tableColumns', 'isTableMode', 'isHoursMode', 'hoursData'],
     data() {
         return {
             sortKey: '',
             sortOrder: 'asc',
-            chartInstances: {}
+            chartInstances: {},
+            hoursChartInstance: null
         }
     },
     template: `
@@ -16,7 +17,7 @@ const DashboardGrid = {
                 <i class="fas fa-spinner fa-spin"></i> Cargando datos...
             </div>
             
-            <!-- MODO TABLA (Product Mix) -->
+            <!-- MODO PRODUCT MIX -->
             <div v-if="isTableMode" class="product-mix-wrapper">
                 <div class="pm-header">
                     <h3><i class="fas fa-chart-pie" style="color: #f59e0b;"></i> Product Mix</h3>
@@ -104,6 +105,110 @@ const DashboardGrid = {
                 <div v-if="!tableData || tableData.length === 0" class="no-data-message">
                     <i class="fas fa-inbox"></i>
                     <p>No hay datos para el período seleccionado</p>
+                </div>
+            </div>
+
+            <!-- MODO HORAS (Ventas por Hora) -->
+            <div v-else-if="isHoursMode" class="hours-wrapper">
+                <div class="pm-header" style="background: linear-gradient(135deg, #4c1d95 0%, #6d28d9 100%);">
+                    <h3><i class="fas fa-clock" style="color: #fbbf24;"></i> Ventas por Hora</h3>
+                    <div class="pm-stats" v-if="hoursData.periods && hoursData.periods.length > 0">
+                        <span class="pm-stat" style="background: rgba(255,255,255,0.15);">
+                            <strong>{{ hoursData.periods.filter(p => !p.isTotal).length }}</strong> períodos
+                        </span>
+                        <span class="pm-stat total" style="background: rgba(251, 191, 36, 0.3);">
+                            Total: <strong>{{ formatCurrency(totalHoursSales) }}</strong>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Gráfico de líneas -->
+                <div class="hours-chart-section" v-if="hoursData.chart">
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <i class="fas fa-chart-line"></i> Ventas por Hora del Día
+                        </div>
+                        <div class="chart-wrapper-secure" style="height: 300px;">
+                            <canvas id="hoursChart" width="800" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla de Períodos -->
+                <div class="hours-table-section">
+                    <h4 class="section-subtitle">
+                        <i class="fas fa-th-large"></i> Resumen por Período del Día
+                    </h4>
+                    <div class="table-responsive">
+                        <table class="pm-table hours-table" v-if="hoursData.periods && hoursData.periods.length > 0">
+                            <thead>
+                                <tr>
+                                    <th>Período</th>
+                                    <th>Horario</th>
+                                    <th class="text-right">Órdenes</th>
+                                    <th class="text-right">Ventas USD</th>
+                                    <th class="text-right">Prom. Diario</th>
+                                    <th>% del Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(row, index) in hoursData.periods" 
+                                    :key="index"
+                                    :class="{ 'pm-total': row.isTotal }"
+                                    :style="!row.isTotal ? 'border-left: 4px solid ' + row.color : ''">
+                                    
+                                    <td>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <span class="period-dot" :style="'background: ' + row.color"></span>
+                                            <span :style="row.isTotal ? 'font-weight: 700; font-size: 1.1rem;' : 'font-weight: 600;'">
+                                                {{ row.periodo }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    
+                                    <td>
+                                        <span class="hours-badge" :style="'background: ' + row.color + '20; color: ' + row.color + '; border: 1px solid ' + row.color">
+                                            {{ row.horario }}
+                                        </span>
+                                    </td>
+                                    
+                                    <td class="text-right">
+                                        <span style="font-weight: 600; color: #475569;">
+                                            {{ formatNumber(row.total_ordenes) }}
+                                        </span>
+                                    </td>
+                                    
+                                    <td class="text-right">
+                                        <span style="font-weight: 700; color: #059669; font-family: monospace;">
+                                            {{ formatCurrency(row.total_ventas_usd) }}
+                                        </span>
+                                    </td>
+                                    
+                                    <td class="text-right">
+                                        <span style="font-weight: 500; color: #6b7280;">
+                                            {{ formatCurrency(row.promedio_diario) }}
+                                        </span>
+                                    </td>
+                                    
+                                    <td>
+                                        <div class="pm-mix-bar">
+                                            <div class="pm-bar-bg">
+                                                <div class="pm-bar-fill" 
+                                                     :style="{ width: Math.min(row.pct_del_total, 100) + '%', background: row.color }">
+                                                </div>
+                                            </div>
+                                            <span class="pm-bar-text">{{ row.pct_del_total.toFixed(1) }}%</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div v-if="!hoursData.periods || hoursData.periods.length === 0" class="no-data-message">
+                    <i class="fas fa-inbox"></i>
+                    <p>No hay datos de ventas por hora para el período seleccionado</p>
                 </div>
             </div>
 
@@ -195,15 +300,23 @@ const DashboardGrid = {
         totalSales() {
             const totalRow = this.tableData.find(r => r.isTotal);
             return totalRow ? totalRow.total_usd : 0;
+        },
+        totalHoursSales() {
+            const totalRow = this.hoursData.periods.find(r => r.isTotal);
+            return totalRow ? totalRow.total_ventas_usd : 0;
         }
     },
     mounted() {
-        if (!this.isTableMode && this.charts && this.charts.length > 0) {
+        if (this.isHoursMode && this.hoursData.chart) {
+            this.$nextTick(() => setTimeout(() => this.renderHoursChart(), 100));
+        } else if (!this.isTableMode && !this.isHoursMode && this.charts && this.charts.length > 0) {
             this.$nextTick(() => setTimeout(() => this.renderCharts(), 100));
         }
     },
     updated() {
-        if (!this.isTableMode && this.charts && this.charts.length > 0) {
+        if (this.isHoursMode && this.hoursData.chart) {
+            this.$nextTick(() => this.renderHoursChart());
+        } else if (!this.isTableMode && !this.isHoursMode && this.charts && this.charts.length > 0) {
             this.$nextTick(() => this.renderCharts());
         }
     },
@@ -211,6 +324,9 @@ const DashboardGrid = {
         Object.values(this.chartInstances).forEach(chart => {
             if (chart) chart.destroy();
         });
+        if (this.hoursChartInstance) {
+            this.hoursChartInstance.destroy();
+        }
     },
     methods: {
         sortBy(key) {
@@ -249,8 +365,140 @@ const DashboardGrid = {
             if (pct >= 5) return 'low';
             return 'min';
         },
+        renderHoursChart() {
+            if (!this.hoursData.chart) return;
+            
+            const canvas = document.getElementById('hoursChart');
+            if (!canvas) {
+                console.warn('Canvas hoursChart no encontrado');
+                return;
+            }
+            
+            if (this.hoursChartInstance) {
+                this.hoursChartInstance.destroy();
+            }
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            
+            const data = this.hoursData.chart;
+            
+            // Crear gradiente
+            const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+            gradient.addColorStop(0, 'rgba(139, 92, 246, 0.3)');
+            gradient.addColorStop(1, 'rgba(139, 92, 246, 0.05)');
+            
+            this.hoursChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.hours,
+                    datasets: [{
+                        label: 'Ventas USD',
+                        data: data.sales,
+                        borderColor: '#8b5cf6',
+                        backgroundColor: gradient,
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointBackgroundColor: '#8b5cf6',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }, {
+                        label: 'Órdenes',
+                        data: data.orders,
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        fill: false,
+                        tension: 0.4,
+                        pointBackgroundColor: '#f59e0b',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        pointRadius: 3,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 15
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                            padding: 12,
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) label += ': ';
+                                    if (context.dataset.label === 'Ventas USD') {
+                                        label += '$' + context.parsed.y.toLocaleString();
+                                    } else {
+                                        label += context.parsed.y.toLocaleString();
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                callback: function(value, index, values) {
+                                    // Mostrar solo algunas horas para no saturar
+                                    const hour = parseInt(this.getLabelForValue(value));
+                                    if (hour % 3 === 0) {
+                                        return this.getLabelForValue(value);
+                                    }
+                                    return '';
+                                }
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + (value / 1000).toFixed(0) + 'k';
+                                }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: false,
+                            position: 'right',
+                            beginAtZero: true,
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+            
+            console.log('Hours chart rendered');
+        },
         renderCharts() {
-            if (!this.charts || this.isTableMode) return;
+            if (!this.charts || this.isTableMode || this.isHoursMode) return;
             
             this.charts.forEach((chartData, index) => {
                 const canvasId = 'chart-' + index;
