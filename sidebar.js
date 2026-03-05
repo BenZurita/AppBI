@@ -5,7 +5,7 @@ const Sidebar = {
         <aside class="sidebar" :class="{ 'open': isOpen }">
             <div class="sidebar-header">
                 <div class="sidebar-logo">
-                    <i class="fas fa-chart-pie"></i>
+                    <i class="fas fa-chart-line"></i>
                     <span>App BI</span>
                 </div>
                 <button class="close-btn" @click="closeSidebar">
@@ -16,7 +16,7 @@ const Sidebar = {
             <nav>
                 <ul class="nav-menu">
                     <li class="nav-item" 
-                        v-for="dash in availableDashboards" 
+                        v-for="dash in allDashboards" 
                         :key="dash.id"
                         @click="selectDashboard(dash.id)">
                         <button class="nav-link" :class="{ active: currentDashboard === dash.id }">
@@ -40,12 +40,6 @@ const Sidebar = {
         </aside>
     `,
     computed: {
-        availableDashboards() {
-            if (this.userRole !== 'admin') {
-                return this.allDashboards.filter(d => d.id !== 'restaurants');
-            }
-            return this.allDashboards;
-        },
         userInitials() {
             if (this.userRole === 'admin') return 'AD';
             return this.unifiedTeamSk ? this.unifiedTeamSk.slice(0, 2).toUpperCase() : 'US';
@@ -59,9 +53,7 @@ const Sidebar = {
         return {
             allDashboards: [
                 { id: 'daily', name: 'Daily Sales', icon: 'fas fa-calendar-day' },
-                { id: 'restaurants', name: 'Detalle de restaurantes', icon: 'fas fa-store' },
-                { id: 'inventario', name: 'Inventario', icon: 'fas fa-box' },
-                { id: 'finanzas', name: 'Finanzas', icon: 'fas fa-dollar-sign' }
+                { id: 'productmix', name: 'Product Mix', icon: 'fas fa-chart-pie' }
             ]
         }
     },

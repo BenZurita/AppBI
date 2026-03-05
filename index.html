@@ -4,11 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>App BI - Panel de Control</title>
+    
+    <!-- ANTI-CACHÉ -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
     <div id="app">
@@ -94,8 +100,8 @@
                     </div>
                 </div>
 
-                <!-- FILTROS TABLA RESTAURANTES (solo visible para admin) -->
-                <div v-if="currentDashboard === 'restaurants' && isAdmin" class="table-filters-panel">
+                <!-- FILTROS PRODUCT MIX -->
+                <div v-if="currentDashboard === 'productmix'" class="table-filters-panel">
                     <div class="filter-section">
                         <h4 class="filter-title">
                             <i class="fas fa-filter"></i>
@@ -120,31 +126,24 @@
                                 </div>
                             </div>
 
-                            <div class="filter-group restaurant-dropdown">
-                                <label>Restaurantes</label>
-                                <div class="custom-dropdown" :class="{ 'active': showRestaurantDropdown }">
-                                    <div class="dropdown-trigger" @click="showRestaurantDropdown = !showRestaurantDropdown">
-                                        <span class="selected-text">{{ selectedRestaurantsText }}</span>
-                                        <i class="fas fa-chevron-down"></i>
-                                    </div>
-                                    <div class="dropdown-menu" v-if="showRestaurantDropdown">
-                                        <div class="dropdown-item checkbox-item" @click="toggleAllRestaurants">
-                                            <input type="checkbox" :checked="isAllSelected" id="select-all-rests">
-                                            <label for="select-all-rests">Seleccionar Todos</label>
-                                        </div>
-                                        <div class="dropdown-divider"></div>
-                                        <div class="dropdown-item checkbox-item" 
-                                             v-for="rest in restaurants" 
-                                             :key="rest.id"
-                                             @click.stop="toggleRestaurant(rest.id)">
-                                            <input type="checkbox" 
-                                                   :checked="tableRestaurants.includes(rest.id) || tableRestaurants.includes('all')" 
-                                                   :id="'rest-' + rest.id">
-                                            <label :for="'rest-' + rest.id">{{ rest.name }}</label>
-                                        </div>
-                                    </div>
+                            <!-- Filtro de restaurante: visible para admin -->
+                            <div v-if="isAdmin" class="filter-group restaurant-dropdown">
+                                <label>Restaurante</label>
+                                <select v-model="selectedRestaurant" @change="changeRestaurant" class="restaurant-select">
+                                    <option value="all">Todos los restaurantes</option>
+                                    <option v-for="rest in restaurants" :key="rest.id" :value="rest.id">
+                                        {{ rest.name }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <!-- Info de restaurante para usuarios restaurante -->
+                            <div v-else class="filter-group restaurant-info">
+                                <label>Restaurante</label>
+                                <div class="restaurant-display" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: #eff6ff; border-radius: 8px; color: #1e40af; font-weight: 600;">
+                                    <i class="fas fa-store"></i>
+                                    <span>{{ userRestaurantName || ('Restaurante ' + unifiedTeamSk) }}</span>
                                 </div>
-                                <small class="help-text">Click para abrir opciones</small>
                             </div>
 
                             <div class="filter-group actions">
@@ -157,13 +156,13 @@
                     </div>
                 </div>
 
-                <!-- Mensaje para usuarios de restaurante en vista de tabla -->
-                <div v-if="currentDashboard === 'restaurants' && !isAdmin" class="table-filters-panel" style="background: #fef3c7; border-left: 4px solid #f59e0b;">
-                    <div style="display: flex; align-items: center; gap: 0.75rem; color: #92400e;">
+                <!-- Mensaje informativo para usuarios de restaurante -->
+                <div v-if="currentDashboard === 'productmix' && !isAdmin" class="table-filters-panel" style="background: #dbeafe; border-left: 4px solid #3b82f6;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; color: #1e40af;">
                         <i class="fas fa-info-circle" style="font-size: 1.25rem;"></i>
                         <div>
-                            <strong>Vista limitada</strong>
-                            <p style="margin: 0; font-size: 0.875rem;">Como usuario de restaurante, solo puedes ver los datos de tu establecimiento.</p>
+                            <strong>Mi Product Mix</strong>
+                            <p style="margin: 0; font-size: 0.875rem;">Visualizando datos de: {{ userRestaurantName || ('Restaurante ' + unifiedTeamSk) }}</p>
                         </div>
                     </div>
                 </div>
@@ -175,17 +174,17 @@
                     :charts="charts"
                     :table-data="tableData"
                     :table-columns="tableColumns"
-                    :is-table-mode="currentDashboard === 'restaurants'"
+                    :is-table-mode="currentDashboard === 'productmix'"
                     :loading="loading">
                 </dashboard-grid>
             </main>
         </div>
     </div>
 
-    <script src="KPICard.js"></script>
-    <script src="DashboardGrid.js"></script>
-    <script src="sidebar.js"></script>
-    <script src="API.js"></script>
+    <script src="KPICard.js?v=3"></script>
+    <script src="DashboardGrid.js?v=3"></script>
+    <script src="sidebar.js?v=3"></script>
+    <script src="API.js?v=3"></script>
     
 <script>
 const { createApp } = Vue;
@@ -200,7 +199,6 @@ createApp({
         const todayStr = today.toISOString().split('T')[0];
         const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
         
-        // DEBUG: Log del estado de autenticación
         console.log('[DEBUG] Initializing app...');
         console.log('[DEBUG] isAuthenticated:', apiService.isAuthenticated());
         console.log('[DEBUG] getRole:', apiService.getRole());
@@ -213,9 +211,7 @@ createApp({
         
         const isUserAdmin = apiService.isAdmin();
         
-        // CORREGIDO: Leer directamente de localStorage para evitar problemas de caché
         const rawTeamSk = localStorage.getItem('unified_team_sk');
-        // Procesar el valor: si es null, 'null', 'undefined' o vacío, convertir a null
         const userTeamSk = (rawTeamSk && rawTeamSk !== 'null' && rawTeamSk !== 'undefined' && rawTeamSk !== '') 
             ? rawTeamSk 
             : null;
@@ -250,14 +246,11 @@ createApp({
             
             tableData: [],
             tableColumns: [
-                { key: 'restaurant', label: 'Restaurante' },
-                { key: 'gmv', label: 'GMV' },
-                { key: 'trx', label: 'Transacciones' },
-                { key: 'aov', label: 'AOV' },
-                { key: 'barquilla', label: 'Barquilla %' },
-                { key: 'queso', label: 'Queso %' },
-                { key: 'agrandado', label: 'Agrandado %' },
-                { key: 'cambio', label: 'Cambio Pz %' }
+                { key: 'product_name', label: 'Producto' },
+                { key: 'category_name', label: 'Categoría' },
+                { key: 'cantidad', label: 'Unidades' },
+                { key: 'total_usd', label: 'Ventas (USD)' },
+                { key: 'pct_weight', label: '% del Mix' }
             ],
             
             currentDate: today.toLocaleDateString('es-ES', { 
@@ -272,9 +265,7 @@ createApp({
         dashboardTitle() {
             const titles = {
                 'daily': 'Daily Sales',
-                'restaurants': 'Detalle de Restaurantes',
-                'inventario': 'Inventario',
-                'finanzas': 'Finanzas'
+                'productmix': 'Product Mix'
             };
             return titles[this.currentDashboard] || 'Dashboard';
         },
@@ -321,34 +312,26 @@ createApp({
             return;
         }
         
-        // CORREGIDO: Recalcular el valor actualizado de unifiedTeamSk desde localStorage
         const rawTeamSk = localStorage.getItem('unified_team_sk');
         const currentTeamSk = (rawTeamSk && rawTeamSk !== 'null' && rawTeamSk !== 'undefined' && rawTeamSk !== '') 
             ? rawTeamSk 
             : null;
         
-        // Actualizar la referencia reactiva si es necesario
         if (currentTeamSk !== this.unifiedTeamSk) {
             console.log('[DEBUG] Updating unifiedTeamSk in mounted from', this.unifiedTeamSk, 'to', currentTeamSk);
             this.unifiedTeamSk = currentTeamSk;
         }
         
-        // Verificación más precisa del unifiedTeamSk
         const hasTeamSk = !!currentTeamSk;
         
         console.log('[DEBUG] unifiedTeamSk in mounted:', currentTeamSk);
         console.log('[DEBUG] hasTeamSk:', hasTeamSk);
         console.log('[DEBUG] isAdmin:', this.isAdmin);
         
-        // Solo mostrar error si NO es admin y realmente NO tiene team_sk
-        // Pero NO mostrar alert porque los datos sí cargan (evitar falso positivo)
         if (!this.isAdmin && !hasTeamSk) {
             console.warn('WARNING: Usuario restaurante sin unified_team_sk válido en localStorage');
-            // Eliminado el alert para evitar falso positivo
-            // Si el backend está enviando datos, el problema es de sincronización localStorage
         }
         
-        // Configurar restaurante solo si tiene team_sk válido
         if (!this.isAdmin && hasTeamSk) {
             this.selectedRestaurant = currentTeamSk;
             this.tableRestaurants = [currentTeamSk];
@@ -378,10 +361,7 @@ createApp({
         },
         
         async changeDashboard(dashboardId) {
-            if (!this.isAdmin && dashboardId === 'restaurants') {
-                alert('Solo los administradores pueden ver el detalle de todos los restaurantes.');
-                return;
-            }
+            // Ya no bloqueamos a restaurantes - todos pueden ver Product Mix
             this.currentDashboard = dashboardId;
             await this.loadDashboardData();
         },
@@ -450,7 +430,7 @@ createApp({
             if (!this.isAdmin) {
                 this.tableRestaurants = [this.unifiedTeamSk];
             }
-            if (this.currentDashboard === 'restaurants') {
+            if (this.currentDashboard === 'productmix') {
                 await this.loadDashboardData();
             }
         },
@@ -482,17 +462,15 @@ createApp({
         async loadDashboardData() {
             this.loading = true;
             try {
-                if (this.currentDashboard === 'restaurants') {
-                    const restaurants = this.isAdmin ? this.tableRestaurants : [this.unifiedTeamSk];
-                    
+                if (this.currentDashboard === 'productmix') {
                     const params = {
                         start_date: this.tableStartDate,
                         end_date: this.tableEndDate,
-                        restaurants: restaurants
+                        restaurant: this.isAdmin ? this.selectedRestaurant : this.unifiedTeamSk
                     };
                     
-                    console.log('[DEBUG] Loading restaurants table with params:', params);
-                    const response = await apiService.getDashboardData('restaurants', params);
+                    console.log('[DEBUG] Loading Product Mix with params:', params);
+                    const response = await apiService.getDashboardData('productmix', params);
                     const data = response.data || response;
                     this.tableData = data.table || [];
                     
@@ -512,7 +490,7 @@ createApp({
                 }
             } catch (error) {
                 console.error('Error cargando datos:', error);
-                if (this.currentDashboard === 'restaurants') {
+                if (this.currentDashboard === 'productmix') {
                     this.tableData = [];
                 } else {
                     this.kpis = [];

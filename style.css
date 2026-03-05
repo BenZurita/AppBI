@@ -1100,3 +1100,177 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
     letter-spacing: -0.03em;
 }
+/* ============================================================
+   PRODUCT MIX - ESTILOS ESENCIALES
+   ============================================================ */
+
+.product-mix-wrapper {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.pm-header {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    color: white;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.pm-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pm-stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.875rem;
+}
+
+.pm-stat {
+    background: rgba(255,255,255,0.15);
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+}
+
+.pm-stat.total {
+    background: rgba(245, 158, 11, 0.3);
+    font-weight: 600;
+}
+
+.pm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+}
+
+.pm-table th {
+    background: #f8fafc;
+    padding: 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: #475569;
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid #e2e8f0;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.pm-table td {
+    padding: 1rem;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+}
+
+.pm-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.pm-top3 {
+    background: #fefce8 !important;
+    border-left: 3px solid #eab308;
+}
+
+.pm-total {
+    background: #1e293b !important;
+    color: white !important;
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.pm-total td {
+    border-bottom: none;
+    padding: 1.25rem 1rem;
+}
+
+.pm-category {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.pm-mix-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 150px;
+}
+
+.pm-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.pm-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.pm-bar-high { background: linear-gradient(90deg, #10b981, #34d399); }
+.pm-bar-med { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+.pm-bar-low { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.pm-bar-min { background: linear-gradient(90deg, #9ca3af, #d1d5db); }
+
+.pm-bar-text {
+    font-weight: 700;
+    color: #1e293b;
+    font-size: 0.875rem;
+    min-width: 45px;
+    text-align: right;
+}
+
+.pm-total .pm-bar-bg {
+    background: rgba(255,255,255,0.3);
+}
+
+.pm-total .pm-bar-fill {
+    background: white !important;
+}
+
+.pm-total .pm-bar-text {
+    color: white;
+}
+
+.text-right {
+    text-align: right !important;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .pm-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .pm-table {
+        font-size: 0.875rem;
+    }
+    
+    .pm-table th,
+    .pm-table td {
+        padding: 0.75rem 0.5rem;
+    }
+    
+    .pm-mix-bar {
+        min-width: 100px;
+    }
+}

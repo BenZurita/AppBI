@@ -172,13 +172,53 @@ async def dashboard_daily(
             
             sql = text(f"""
                 SELECT 
-                    COALESCE(SUM(gmv), 0) as gmv,
-                    COALESCE(SUM(trx), 0) as trx,
-                    CASE WHEN SUM(trx) > 0 THEN ROUND(SUM(gmv)/SUM(trx), 2) ELSE 0 END as aov,
-                    AVG(COALESCE(b.pct_barquillas_combo, 0)) * 100 as barquilla_pct,
-                    AVG(COALESCE(c.pct_cambio_pz, 0)) * 100 as cambio_pct,
-                    AVG(COALESCE(q.pct_queso, 0)) * 100 as queso_pct,
-                    AVG(COALESCE(g.pct_gde, 0)) * 100 as gde_pct
+                    COALESCE(SUM(d.gmv), 0) as gmv,
+                    COALESCE(SUM(d.trx), 0) as trx,
+                    CASE WHEN SUM(d.trx) > 0 THEN ROUND(SUM(d.gmv)/SUM(d.trx), 2) ELSE 0 END as aov,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN b.pct_barquillas_combo IS NOT NULL 
+                                THEN b.pct_barquillas_combo 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as barquilla_pct,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN c.pct_cambio_pz IS NOT NULL 
+                                THEN c.pct_cambio_pz 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as cambio_pct,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN q.pct_queso IS NOT NULL 
+                                THEN q.pct_queso 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as queso_pct,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN g.pct_gde IS NOT NULL 
+                                THEN g.pct_gde 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as gde_pct,
+                    COUNT(b.pct_barquillas_combo) as barquilla_count,
+                    COUNT(c.pct_cambio_pz) as cambio_count,
+                    COUNT(q.pct_queso) as queso_count,
+                    COUNT(g.pct_gde) as gde_count
                 FROM daily_metrics d
                 LEFT JOIN barquilla_combo b ON d.date_id = b.date_id AND d.unified_team_sk = b.unified_team_sk
                 LEFT JOIN cambio_pz c ON d.date_id = c.date_id AND d.unified_team_sk = c.unified_team_sk
@@ -187,6 +227,18 @@ async def dashboard_daily(
                 WHERE d.date_id = :date_id {filter_team}
             """)
             row = (await session.execute(sql, params)).fetchone()
+            
+            if row.gmv is None and row.trx is None:
+                return {
+                    "gmv": 0.0,
+                    "trx": 0,
+                    "aov": 0.0,
+                    "barquilla": 0.0,
+                    "cambio": 0.0,
+                    "queso": 0.0,
+                    "gde": 0.0
+                }
+            
             return {
                 "gmv": float(row.gmv or 0),
                 "trx": int(row.trx or 0),
@@ -207,13 +259,49 @@ async def dashboard_daily(
             
             sql = text(f"""
                 SELECT 
-                    COALESCE(SUM(gmv), 0) as gmv,
-                    COALESCE(SUM(trx), 0) as trx,
-                    CASE WHEN SUM(trx) > 0 THEN ROUND(SUM(gmv)/SUM(trx), 2) ELSE 0 END as aov,
-                    AVG(COALESCE(b.pct_barquillas_combo, 0)) * 100 as barquilla_pct,
-                    AVG(COALESCE(c.pct_cambio_pz, 0)) * 100 as cambio_pct,
-                    AVG(COALESCE(q.pct_queso, 0)) * 100 as queso_pct,
-                    AVG(COALESCE(g.pct_gde, 0)) * 100 as gde_pct
+                    COALESCE(SUM(d.gmv), 0) as gmv,
+                    COALESCE(SUM(d.trx), 0) as trx,
+                    CASE WHEN SUM(d.trx) > 0 THEN ROUND(SUM(d.gmv)/SUM(d.trx), 2) ELSE 0 END as aov,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN b.pct_barquillas_combo IS NOT NULL 
+                                THEN b.pct_barquillas_combo 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as barquilla_pct,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN c.pct_cambio_pz IS NOT NULL 
+                                THEN c.pct_cambio_pz 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as cambio_pct,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN q.pct_queso IS NOT NULL 
+                                THEN q.pct_queso 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as queso_pct,
+                    COALESCE(
+                        AVG(
+                            CASE 
+                                WHEN g.pct_gde IS NOT NULL 
+                                THEN g.pct_gde 
+                                ELSE NULL 
+                            END
+                        ) * 100, 
+                        0
+                    ) as gde_pct
                 FROM daily_metrics d
                 LEFT JOIN barquilla_combo b ON d.date_id = b.date_id AND d.unified_team_sk = b.unified_team_sk
                 LEFT JOIN cambio_pz c ON d.date_id = c.date_id AND d.unified_team_sk = c.unified_team_sk
@@ -222,6 +310,18 @@ async def dashboard_daily(
                 WHERE d.date_id BETWEEN :start AND :end {filter_team}
             """)
             row = (await session.execute(sql, params)).fetchone()
+            
+            if row.gmv is None:
+                return {
+                    "gmv": 0.0,
+                    "trx": 0,
+                    "aov": 0.0,
+                    "barquilla": 0.0,
+                    "cambio": 0.0,
+                    "queso": 0.0,
+                    "gde": 0.0
+                }
+            
             return {
                 "gmv": float(row.gmv or 0),
                 "trx": int(row.trx or 0),
@@ -394,24 +494,28 @@ async def dashboard_daily(
 
 
 # ============================================================
-# ENDPOINT: Detalle de Restaurantes (con filtro de seguridad)
+# ENDPOINT: Product Mix (reemplaza a Detalle de Restaurantes)
 # ============================================================
 
-@router.get("/dashboard/restaurants")
-async def dashboard_restaurants(
+@router.get("/dashboard/productmix")
+async def dashboard_product_mix(
     start_date: str = Query(...),
     end_date: str = Query(...),
-    restaurants: list[str] = Query(default=["all"]),
+    restaurant: str = Query("all"),
     restaurant_filter: RestaurantFilter = None
 ):
     """
-    Tabla comparativa de restaurantes en un rango de fechas
+    Product Mix: Ventas por producto en un rango de fechas
+    Muestra: product_name, cantidad, total_usd, % peso del producto
     """
     # Aplicar filtro de seguridad
-    effective_restaurants = restaurants
-    if restaurant_filter and not restaurant_filter["can_view_all"]:
-        effective_restaurants = [restaurant_filter["restaurant_filter"]]
-        print(f"[DEBUG] Restaurants view restricted to: {effective_restaurants}")
+    effective_restaurant = restaurant
+    if restaurant_filter:
+        if not restaurant_filter["can_view_all"]:
+            effective_restaurant = restaurant_filter["restaurant_filter"]
+            print(f"[DEBUG] Product Mix restricted to: {effective_restaurant}")
+        else:
+            print(f"[DEBUG] Admin Product Mix, restaurant: {restaurant}")
     
     try:
         date_start = int(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d"))
@@ -419,7 +523,7 @@ async def dashboard_restaurants(
     except ValueError:
         raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
 
-    cache_key = hashlib.md5(f"restaurants:{date_start}:{date_end}:{':'.join(sorted(effective_restaurants))}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
+    cache_key = hashlib.md5(f"productmix:{date_start}:{date_end}:{effective_restaurant}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
     
     try:
         cache = get_cache()
@@ -430,82 +534,61 @@ async def dashboard_restaurants(
         cache = None
 
     async with AsyncSessionLocal() as session:
-        # Filtro de restaurantes
         restaurant_filter_sql = ""
         params = {"start": date_start, "end": date_end}
         
-        if effective_restaurants and "all" not in effective_restaurants:
-            restaurant_filter_sql = "AND d.unified_team_sk = ANY(:restaurants)"
-            params["restaurants"] = effective_restaurants
+        if effective_restaurant and effective_restaurant != "all":
+            restaurant_filter_sql = "AND pm.unified_team_sk = :restaurant"
+            params["restaurant"] = effective_restaurant
 
-        # Query principal
+        # Query principal: agregar ventas por producto
         sql = text(f"""
             SELECT 
-                r.restaurant_name as restaurant,
-                SUM(d.gmv) as gmv,
-                SUM(d.trx) as trx,
-                CASE WHEN SUM(d.trx) > 0 THEN ROUND(SUM(d.gmv)/SUM(d.trx), 2) ELSE 0 END as aov,
-                AVG(COALESCE(b.pct_barquillas_combo, 0)) * 100 as barquilla_pct,
-                AVG(COALESCE(c.pct_cambio_pz, 0)) * 100 as cambio_pct,
-                AVG(COALESCE(q.pct_queso, 0)) * 100 as queso_pct,
-                AVG(COALESCE(g.pct_gde, 0)) * 100 as gde_pct
-            FROM daily_metrics d
-            JOIN unified_restaurant_map r ON d.unified_team_sk = r.unified_team_sk
-            LEFT JOIN barquilla_combo b ON d.date_id = b.date_id AND d.unified_team_sk = b.unified_team_sk
-            LEFT JOIN cambio_pz c ON d.date_id = c.date_id AND d.unified_team_sk = c.unified_team_sk
-            LEFT JOIN queso_metric q ON d.date_id = q.date_id AND d.unified_team_sk = q.unified_team_sk
-            LEFT JOIN gde_metric g ON d.date_id = g.date_id AND d.unified_team_sk = g.unified_team_sk
-            WHERE d.date_id BETWEEN :start AND :end
+                COALESCE(p.producto_final, p.product_name, pm.product_sk_n) AS product_name,
+                COALESCE(p.category_name, 'Sin Categoría') AS category_name,
+                SUM(pm.cantidad) AS cantidad,
+                SUM(pm.total_price_subtotal_usd) AS total_usd
+            FROM product_mix_daily pm
+            LEFT JOIN dim_product p ON pm.product_sk_n = p.product_sk_n
+            WHERE pm.date_id BETWEEN :start AND :end
             {restaurant_filter_sql}
-            GROUP BY r.restaurant_name
-            HAVING SUM(d.gmv) > 0
-            ORDER BY SUM(d.gmv) DESC
+            GROUP BY COALESCE(p.producto_final, p.product_name, pm.product_sk_n), 
+                     COALESCE(p.category_name, 'Sin Categoría')
+            HAVING SUM(pm.total_price_subtotal_usd) > 0
+            ORDER BY SUM(pm.total_price_subtotal_usd) DESC
         """)
         
         result = await session.execute(sql, params)
         rows = result.fetchall()
 
-        # Calcular totales
-        total_gmv = sum(float(r.gmv or 0) for r in rows)
-        total_trx = sum(int(r.trx or 0) for r in rows)
+        # Calcular total para porcentajes
+        total_gmv = sum(float(r.total_usd or 0) for r in rows)
         
-        totals_sec = {
-            "barquilla": sum(float(r.barquilla_pct or 0) for r in rows),
-            "cambio": sum(float(r.cambio_pct or 0) for r in rows),
-            "queso": sum(float(r.queso_pct or 0) for r in rows),
-            "gde": sum(float(r.gde_pct or 0) for r in rows)
-        }
-        count = len(rows)
-
+        # Preparar datos con porcentaje
         table_data = []
         for row in rows:
-            gmv = float(row.gmv or 0)
-            trx = int(row.trx or 0)
-            aov = float(row.aov or 0)
+            gmv = float(row.total_usd or 0)
+            qty = int(row.cantidad or 0)
+            pct_weight = round((gmv / total_gmv) * 100, 2) if total_gmv > 0 else 0
+            
             table_data.append({
-                "restaurant": row.restaurant,
-                "gmv": f"${gmv:,.2f}",
-                "trx": f"{trx:,}",
-                "aov": f"${aov:,.2f}",
-                "barquilla": f"{float(row.barquilla_pct or 0):.2f}%",
-                "cambio": f"{float(row.cambio_pct or 0):.2f}%",
-                "queso": f"{float(row.queso_pct or 0):.2f}%",
-                "agrandado": f"{float(row.gde_pct or 0):.2f}%",
+                "product_name": row.product_name,
+                "category_name": row.category_name,
+                "cantidad": qty,
+                "total_usd": round(gmv, 2),
+                "pct_weight": pct_weight
             })
 
         # Fila de totales
-        if count > 0:
-            avg_aov = round(total_gmv / max(total_trx, 1), 2)
+        if table_data:
+            total_qty = sum(r["cantidad"] for r in table_data)
             table_data.append({
-                "restaurant": "** TOTAL **",
-                "gmv": f"${total_gmv:,.2f}",
-                "trx": f"{int(total_trx):,}",
-                "aov": f"${avg_aov:,.2f}",
-                "barquilla": f"{totals_sec['barquilla']/count:.2f}%",
-                "cambio": f"{totals_sec['cambio']/count:.2f}%",
-                "queso": f"{totals_sec['queso']/count:.2f}%",
-                "agrandado": f"{totals_sec['gde']/count:.2f}%",
-                "isTotal": True,
+                "product_name": "** TOTAL **",
+                "category_name": "",
+                "cantidad": total_qty,
+                "total_usd": round(total_gmv, 2),
+                "pct_weight": 100.0,
+                "isTotal": True
             })
 
         response = {
@@ -513,6 +596,8 @@ async def dashboard_restaurants(
             "data": {
                 "table": table_data,
                 "period": {"start": start_date, "end": end_date},
+                "restaurant_filter": effective_restaurant,
+                "total_products": len(table_data) - 1
             },
         }
 

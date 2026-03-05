@@ -16,33 +16,85 @@ const DashboardGrid = {
                 <i class="fas fa-spinner fa-spin"></i> Cargando datos...
             </div>
             
-            <!-- MODO TABLA (Detalles por restaurante) -->
-            <div v-if="isTableMode" class="table-dashboard-container">
-                <div class="table-header">
-                    <h3>Detalle por Restaurante</h3>
-                    <span class="period-badge" v-if="tableData && tableData.length > 0">
-                        <i class="fas fa-calendar-alt"></i>
-                        Período: {{ tablePeriod }}
-                    </span>
+            <!-- MODO TABLA (Product Mix) -->
+            <div v-if="isTableMode" class="product-mix-wrapper">
+                <div class="pm-header">
+                    <h3><i class="fas fa-chart-pie" style="color: #f59e0b;"></i> Product Mix</h3>
+                    <div class="pm-stats" v-if="tableData && tableData.length > 0">
+                        <span class="pm-stat">
+                            <strong>{{ totalProducts }}</strong> productos
+                        </span>
+                        <span class="pm-stat total">
+                            Total: <strong>{{ formatCurrency(totalSales) }}</strong>
+                        </span>
+                    </div>
                 </div>
                 
                 <div class="table-responsive">
-                    <table class="data-table compact-table" v-if="sortedTableData && sortedTableData.length > 0">
+                    <table class="pm-table" v-if="sortedTableData && sortedTableData.length > 0">
                         <thead>
                             <tr>
-                                <th v-for="col in tableColumns" :key="col.key" 
-                                    :class="{ 'text-right': col.key !== 'restaurant', 'sortable': true, 'sorted': sortKey === col.key }"
-                                    @click="sortBy(col.key)">
-                                    {{ col.label }}
-                                    <i class="fas sort-icon" :class="getSortIcon(col.key)"></i>
+                                <th @click="sortBy('product_name')">
+                                    Producto <i class="fas" :class="getSortIcon('product_name')"></i>
+                                </th>
+                                <th @click="sortBy('category_name')">
+                                    Categoría <i class="fas" :class="getSortIcon('category_name')"></i>
+                                </th>
+                                <th class="text-right" @click="sortBy('cantidad')">
+                                    Unidades <i class="fas" :class="getSortIcon('cantidad')"></i>
+                                </th>
+                                <th class="text-right" @click="sortBy('total_usd')">
+                                    Ventas USD <i class="fas" :class="getSortIcon('total_usd')"></i>
+                                </th>
+                                <th @click="sortBy('pct_weight')">
+                                    % del Mix <i class="fas" :class="getSortIcon('pct_weight')"></i>
                                 </th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="(row, index) in sortedTableData" :key="index" :class="{ 'total-row': row.isTotal }">
-                                <td v-for="col in tableColumns" :key="col.key" 
-                                    :class="{ 'text-right': col.key !== 'restaurant', 'restaurant-name': col.key === 'restaurant', 'total-cell': row.isTotal }">
-                                    {{ row[col.key] }}
+                            <tr v-for="(row, index) in sortedTableData" 
+                                :key="index"
+                                :class="{ 'pm-total': row.isTotal, 'pm-top3': index < 3 && !row.isTotal }">
+                                
+                                <td>
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <i v-if="index === 0 && !row.isTotal" class="fas fa-crown" style="color: #eab308;"></i>
+                                        <i v-else-if="index === 1 && !row.isTotal" class="fas fa-medal" style="color: #9ca3af;"></i>
+                                        <i v-else-if="index === 2 && !row.isTotal" class="fas fa-medal" style="color: #b45309;"></i>
+                                        <span :style="row.isTotal ? 'font-weight: 700; font-size: 1.1rem;' : 'font-weight: 500;'">
+                                            {{ row.product_name }}
+                                        </span>
+                                    </div>
+                                </td>
+                                
+                                <td>
+                                    <span class="pm-category" :style="getCategoryColor(row.category_name)">
+                                        {{ row.category_name || '-' }}
+                                    </span>
+                                </td>
+                                
+                                <td class="text-right">
+                                    <span style="font-weight: 600; color: #475569;">
+                                        {{ formatNumber(row.cantidad) }}
+                                    </span>
+                                </td>
+                                
+                                <td class="text-right">
+                                    <span style="font-weight: 700; color: #059669; font-family: monospace;">
+                                        {{ formatCurrency(row.total_usd) }}
+                                    </span>
+                                </td>
+                                
+                                <td>
+                                    <div class="pm-mix-bar">
+                                        <div class="pm-bar-bg">
+                                            <div class="pm-bar-fill" 
+                                                 :class="'pm-bar-' + getBarType(row.pct_weight)"
+                                                 :style="{ width: Math.min(row.pct_weight, 100) + '%' }">
+                                            </div>
+                                        </div>
+                                        <span class="pm-bar-text">{{ row.pct_weight.toFixed(1) }}%</span>
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>
@@ -57,7 +109,6 @@ const DashboardGrid = {
 
             <!-- MODO NORMAL (Dashboard con KPIs) -->
             <template v-else>
-                <!-- KPIs Principales (GMV, TRX, AOV) -->
                 <div class="dashboard-grid">
                     <kpi-card 
                         v-for="(kpi, index) in kpis" 
@@ -66,7 +117,6 @@ const DashboardGrid = {
                     </kpi-card>
                 </div>
 
-                <!-- Métricas Secundarias -->
                 <div class="secondary-metrics-section" v-if="secondaryMetrics && secondaryMetrics.length">
                     <h3 class="section-title">
                         <i class="fas fa-percentage"></i>
@@ -99,7 +149,6 @@ const DashboardGrid = {
                     </div>
                 </div>
 
-                <!-- Charts Section CON WRAPPER ROBUSTO -->
                 <div class="charts-section" v-if="charts && charts.length">
                     <div class="chart-container" v-for="(chart, index) in charts" :key="index">
                         <div class="chart-header">{{ chart.title }}</div>
@@ -112,13 +161,6 @@ const DashboardGrid = {
         </div>
     `,
     computed: {
-        tablePeriod() {
-            if (this.tableData && this.tableData.length > 0 && this.tableData[0].period) {
-                const p = this.tableData[0].period;
-                return `${p.start} al ${p.end}`;
-            }
-            return '';
-        },
         sortedTableData() {
             if (!this.tableData) return [];
             
@@ -130,47 +172,39 @@ const DashboardGrid = {
             }
             
             const sorted = [...normalData].sort((a, b) => {
-                let valA = a[this.sortKey];
-                let valB = b[this.sortKey];
+                let valA = parseFloat(a[this.sortKey]) || 0;
+                let valB = parseFloat(b[this.sortKey]) || 0;
                 
-                if (typeof valA === 'string') {
-                    const cleanA = valA.replace(/[$,%]/g, '').replace(/,/g, '');
-                    const cleanB = valB.replace(/[$,%]/g, '').replace(/,/g, '');
-                    const numA = parseFloat(cleanA);
-                    const numB = parseFloat(cleanB);
-                    
-                    if (!isNaN(numA) && !isNaN(numB)) {
-                        valA = numA;
-                        valB = numB;
-                    }
+                if (this.sortKey === 'product_name' || this.sortKey === 'category_name') {
+                    valA = a[this.sortKey] || '';
+                    valB = b[this.sortKey] || '';
+                    return this.sortOrder === 'asc' 
+                        ? valA.localeCompare(valB) 
+                        : valB.localeCompare(valA);
                 }
                 
-                if (valA < valB) return this.sortOrder === 'asc' ? -1 : 1;
-                if (valA > valB) return this.sortOrder === 'asc' ? 1 : -1;
-                return 0;
+                return this.sortOrder === 'asc' ? valA - valB : valB - valA;
             });
             
-            if (totalRow) {
-                sorted.push(totalRow);
-            }
-            
+            if (totalRow) sorted.push(totalRow);
             return sorted;
+        },
+        totalProducts() {
+            return this.tableData ? this.tableData.filter(r => !r.isTotal).length : 0;
+        },
+        totalSales() {
+            const totalRow = this.tableData.find(r => r.isTotal);
+            return totalRow ? totalRow.total_usd : 0;
         }
     },
     mounted() {
-        // Renderizar charts si existen al montar
         if (!this.isTableMode && this.charts && this.charts.length > 0) {
-            this.$nextTick(() => {
-                setTimeout(() => this.renderCharts(), 100);
-            });
+            this.$nextTick(() => setTimeout(() => this.renderCharts(), 100));
         }
     },
     updated() {
-        // Renderizar charts cuando se actualicen los datos
         if (!this.isTableMode && this.charts && this.charts.length > 0) {
-            this.$nextTick(() => {
-                this.renderCharts();
-            });
+            this.$nextTick(() => this.renderCharts());
         }
     },
     beforeUnmount() {
@@ -191,6 +225,30 @@ const DashboardGrid = {
             if (this.sortKey !== key) return 'fa-sort';
             return this.sortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down';
         },
+        formatNumber(num) {
+            if (num === undefined || num === null) return '0';
+            return num.toLocaleString('es-ES');
+        },
+        formatCurrency(num) {
+            if (num === undefined || num === null) return '$0.00';
+            return '$' + num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+        getCategoryColor(category) {
+            const colors = {
+                'Helados': 'background: #fef3c7; color: #92400e; border: 1px solid #f59e0b;',
+                'Bebidas': 'background: #dbeafe; color: #1e40af; border: 1px solid #3b82f6;',
+                'Toppings': 'background: #fce7f3; color: #9d174d; border: 1px solid #ec4899;',
+                'Combos': 'background: #d1fae5; color: #065f46; border: 1px solid #10b981;',
+                'Snacks': 'background: #ffedd5; color: #9a3412; border: 1px solid #f97316;'
+            };
+            return colors[category] || 'background: #f3f4f6; color: #4b5563; border: 1px solid #d1d5db;';
+        },
+        getBarType(pct) {
+            if (pct >= 20) return 'high';
+            if (pct >= 10) return 'med';
+            if (pct >= 5) return 'low';
+            return 'min';
+        },
         renderCharts() {
             if (!this.charts || this.isTableMode) return;
             
@@ -203,13 +261,11 @@ const DashboardGrid = {
                     return;
                 }
                 
-                // Destruir instancia anterior si existe
                 if (this.chartInstances[canvasId]) {
                     this.chartInstances[canvasId].destroy();
                     this.chartInstances[canvasId] = null;
                 }
                 
-                // Verificar que el canvas tenga dimensiones
                 if (canvas.width === 0 || canvas.height === 0) {
                     canvas.width = 800;
                     canvas.height = 300;
@@ -222,7 +278,6 @@ const DashboardGrid = {
                 }
                 
                 try {
-                    // Configuración robusta de datos
                     const config = {
                         type: chartData.type || 'line',
                         data: chartData.data,
