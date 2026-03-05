@@ -31,14 +31,15 @@ const apiService = {
         localStorage.setItem('role', data.role);
         localStorage.setItem('can_view_all', data.can_view_all ? 'true' : 'false');
         
-        // CORREGIDO: Usar != null para chequear tanto null como undefined
-        // También aceptar string vacío pero no null/undefined
-        if (data.unified_team_sk != null && data.unified_team_sk !== '') {
-            localStorage.setItem('unified_team_sk', data.unified_team_sk);
-            console.log('[DEBUG] Saved unified_team_sk:', data.unified_team_sk);
+        // CORREGIDO: Siempre guardar el valor que viene del backend si existe la key
+        // para mantener sincronización, incluso si es null o vacío
+        if (data.hasOwnProperty('unified_team_sk')) {
+            const valueToStore = data.unified_team_sk || '';
+            localStorage.setItem('unified_team_sk', valueToStore);
+            console.log('[DEBUG] Saved unified_team_sk:', valueToStore);
         } else {
             localStorage.removeItem('unified_team_sk');
-            console.log('[DEBUG] No unified_team_sk to save (null or undefined)');
+            console.log('[DEBUG] No unified_team_sk key in response');
         }
 
         return data;
@@ -66,7 +67,12 @@ const apiService = {
     },
 
     getUnifiedTeamSk() {
-        return localStorage.getItem('unified_team_sk');
+        const raw = localStorage.getItem('unified_team_sk');
+        // CORREGIDO: Filtrar valores inválidos explícitamente
+        if (raw === null || raw === 'null' || raw === 'undefined' || raw === undefined) {
+            return null;
+        }
+        return raw;
     },
 
     getUsername() {

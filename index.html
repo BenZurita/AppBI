@@ -204,7 +204,6 @@ createApp({
         console.log('[DEBUG] Initializing app...');
         console.log('[DEBUG] isAuthenticated:', apiService.isAuthenticated());
         console.log('[DEBUG] getRole:', apiService.getRole());
-        console.log('[DEBUG] getUnifiedTeamSk:', apiService.getUnifiedTeamSk());
         
         if (!apiService.isAuthenticated()) {
             console.log('[DEBUG] Not authenticated, redirecting to login');
@@ -213,10 +212,17 @@ createApp({
         }
         
         const isUserAdmin = apiService.isAdmin();
-        const userTeamSk = apiService.getUnifiedTeamSk();
+        
+        // CORREGIDO: Leer directamente de localStorage para evitar problemas de caché
+        const rawTeamSk = localStorage.getItem('unified_team_sk');
+        // Procesar el valor: si es null, 'null', 'undefined' o vacío, convertir a null
+        const userTeamSk = (rawTeamSk && rawTeamSk !== 'null' && rawTeamSk !== 'undefined' && rawTeamSk !== '') 
+            ? rawTeamSk 
+            : null;
         
         console.log('[DEBUG] isUserAdmin:', isUserAdmin);
-        console.log('[DEBUG] userTeamSk:', userTeamSk);
+        console.log('[DEBUG] rawTeamSk from localStorage:', rawTeamSk);
+        console.log('[DEBUG] processed userTeamSk:', userTeamSk);
         
         return {
             currentDashboard: 'daily',
@@ -239,7 +245,7 @@ createApp({
             
             tableStartDate: startOfYear,
             tableEndDate: todayStr,
-            tableRestaurants: isUserAdmin ? ['all'] : [userTeamSk || 'all'],
+            tableRestaurants: isUserAdmin ? ['all'] : (userTeamSk ? [userTeamSk] : ['all']),
             showRestaurantDropdown: false,
             
             tableData: [],
@@ -307,56 +313,61 @@ createApp({
         }
     },
     mounted() {
-    console.log('[DEBUG] mounted() called');
-    
-    if (!apiService.isAuthenticated()) {
-        console.log('[DEBUG] Not authenticated in mounted, redirecting');
-        window.location.href = '/login.html';
-        return;
-    }
-    
-    // Verificación más precisa del unifiedTeamSk
-    const teamSkValue = this.unifiedTeamSk;
-    const hasTeamSk = teamSkValue !== null && 
-                      teamSkValue !== undefined && 
-                      teamSkValue !== '' && 
-                      String(teamSkValue) !== 'null' &&
-                      String(teamSkValue) !== 'undefined';
-    
-    console.log('[DEBUG] unifiedTeamSk raw value:', teamSkValue);
-    console.log('[DEBUG] unifiedTeamSk type:', typeof teamSkValue);
-    console.log('[DEBUG] hasTeamSk:', hasTeamSk);
-    console.log('[DEBUG] isAdmin:', this.isAdmin);
-    
-    // Solo mostrar error si realmente no tiene team_sk
-    if (!this.isAdmin && !hasTeamSk) {
-        console.error('ERROR: Usuario restaurante sin unified_team_sk válido');
-        alert('Error: Tu usuario no tiene un restaurante asignado. Contacte al administrador.');
-        // Opcional: descomentar si quieres forzar logout
-        // apiService.logout();
-        // return;
-    }
-    
-    // Configurar restaurante solo si tiene team_sk válido
-    if (!this.isAdmin && hasTeamSk) {
-        this.selectedRestaurant = this.unifiedTeamSk;
-        this.tableRestaurants = [this.unifiedTeamSk];
-        console.log('[DEBUG] Configured restaurant:', this.unifiedTeamSk);
-    }
-    
-    this.loadRestaurants();
-    this.loadDashboardData();
-    
-    if (window.innerWidth <= 768) {
-        this.sidebarOpen = false;
-    }
-    
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest('.custom-dropdown')) {
-            this.showRestaurantDropdown = false;
+        console.log('[DEBUG] mounted() called');
+        
+        if (!apiService.isAuthenticated()) {
+            console.log('[DEBUG] Not authenticated in mounted, redirecting');
+            window.location.href = '/login.html';
+            return;
         }
-    });
-},
+        
+        // CORREGIDO: Recalcular el valor actualizado de unifiedTeamSk desde localStorage
+        const rawTeamSk = localStorage.getItem('unified_team_sk');
+        const currentTeamSk = (rawTeamSk && rawTeamSk !== 'null' && rawTeamSk !== 'undefined' && rawTeamSk !== '') 
+            ? rawTeamSk 
+            : null;
+        
+        // Actualizar la referencia reactiva si es necesario
+        if (currentTeamSk !== this.unifiedTeamSk) {
+            console.log('[DEBUG] Updating unifiedTeamSk in mounted from', this.unifiedTeamSk, 'to', currentTeamSk);
+            this.unifiedTeamSk = currentTeamSk;
+        }
+        
+        // Verificación más precisa del unifiedTeamSk
+        const hasTeamSk = !!currentTeamSk;
+        
+        console.log('[DEBUG] unifiedTeamSk in mounted:', currentTeamSk);
+        console.log('[DEBUG] hasTeamSk:', hasTeamSk);
+        console.log('[DEBUG] isAdmin:', this.isAdmin);
+        
+        // Solo mostrar error si NO es admin y realmente NO tiene team_sk
+        // Pero NO mostrar alert porque los datos sí cargan (evitar falso positivo)
+        if (!this.isAdmin && !hasTeamSk) {
+            console.warn('WARNING: Usuario restaurante sin unified_team_sk válido en localStorage');
+            // Eliminado el alert para evitar falso positivo
+            // Si el backend está enviando datos, el problema es de sincronización localStorage
+        }
+        
+        // Configurar restaurante solo si tiene team_sk válido
+        if (!this.isAdmin && hasTeamSk) {
+            this.selectedRestaurant = currentTeamSk;
+            this.tableRestaurants = [currentTeamSk];
+            console.log('[DEBUG] Configured restaurant:', currentTeamSk);
+        }
+        
+        this.loadRestaurants();
+        this.loadDashboardData();
+        
+        if (window.innerWidth <= 768) {
+            this.sidebarOpen = false;
+        }
+        
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.custom-dropdown')) {
+                this.showRestaurantDropdown = false;
+            }
+        });
+    },
     methods: {
         toggleSidebar() {
             this.sidebarOpen = !this.sidebarOpen;
