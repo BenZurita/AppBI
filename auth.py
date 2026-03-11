@@ -229,3 +229,143 @@ async def read_me(current_user: CurrentUser):
         unified_team_sk=unified_team_sk,
         can_view_all=(role == "admin")
     )
+# Agregar al final de auth.py, antes del cierre
+
+# ─── Schemas adicionales ──────────────────────────────────────────────────────
+
+class UserListItem(BaseModel):
+    model_config = ConfigDict(exclude_none=False)
+    username: str
+    role: str
+    unified_team_sk: Optional[str] = None
+    is_active: bool
+    restaurant_name: Optional[str] = None
+
+
+class PasswordChangeRequest(BaseModel):
+    target_username: str
+    new_password: str
+
+
+class PasswordChangeResponse(BaseModel):
+    success: bool
+    message: str
+
+
+# ─── Admin Endpoints ─────────────────────────────────────────────────────────
+
+@router.get("/admin/users", response_model=list[UserListItem])
+async def list_users(current_user: CurrentUser):
+    """Listar todos los usuarios (solo admin)"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden ver la lista de usuarios"
+        )
+    
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+                SELECT 
+                    u.username, 
+                    u.role, 
+                    u.unified_team_sk, 
+                    u.is_active,
+                    r.restaurant_name
+                FROM users u
+                LEFT JOIN unified_restaurant_map r 
+                    ON u.unified_team_sk = r.unified_team_sk
+                ORDER BY 
+                    CASE u.role WHEN 'admin' THEN 0 ELSE 1 END,
+                    u.username
+            """)
+        )
+        rows = result.fetchall()
+        
+        return [
+            UserListItem(
+                username=r.username,
+                role=r.role or "restaurant",
+                unified_team_sk=r.unified_team_sk,
+                is_active=r.is_active,
+                restaurant_name=r.restaurant_name
+            )
+            for r in rows
+        ]
+
+
+@router.post("/admin/users/reset-password", response_model=PasswordChangeResponse)
+async def reset_password(
+    request: PasswordChangeRequest,
+    current_user: CurrentUser
+):
+    """Cambiar contraseña de cualquier usuario (solo admin)"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden cambiar contraseñas"
+        )
+    
+    # Validar que la contraseña no esté vacía
+    if not request.new_password or len(request.new_password) < 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña debe tener al menos 4 caracteres"
+        )
+    
+    async with AsyncSessionLocal() as session:
+        # Verificar que el usuario objetivo existe
+        check_result = await session.execute(
+            text("SELECT username, role FROM users WHERE username = :username"),
+            {"username": request.target_username}
+        )
+        target = check_result.fetchone()
+        
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Usuario '{request.target_username}' no encontrado"
+            )
+        
+        # Generar hash según el rol del usuario objetivo
+        # Admin usa bcrypt, restaurante usa MD5 (para compatibilidad)
+        new_hash = ""
+        if target.role == "admin":
+            # Bcrypt para admins
+            plain_bytes = request.new_password.encode('utf-8')
+            if len(plain_bytes) > 72:
+                plain_bytes = plain_bytes[:72]
+            new_hash = bcrypt.hashpw(plain_bytes, bcrypt.gensalt(rounds=12)).decode('utf-8')
+        else:
+            # MD5 para restaurantes (mantener compatibilidad)
+            new_hash = hashlib.md5(request.new_password.encode('utf-8')).hexdigest()
+        
+        # Actualizar contraseña
+        await session.execute(
+            text("""
+                UPDATE users 
+                SET password_hash = :new_hash,
+                    updated_at = NOW()
+                WHERE username = :username
+            """),
+            {
+                "username": request.target_username,
+                "new_hash": new_hash
+            }
+        )
+        await session.commit()
+        
+        # Limpiar cache del usuario si existe
+        try:
+            cache = get_cache()
+            # Invalidar cualquier cache relacionado con este usuario
+            await cache.delete(f"restaurants_list:{request.target_username}")
+        except Exception:
+            pass
+        
+        print(f"[ADMIN] Password changed for {request.target_username} by {current_user['username']}")
+        
+        return PasswordChangeResponse(
+            success=True,
+            message=f"Contraseña de '{request.target_username}' actualizada exitosamente"
+        )
