@@ -2,7 +2,11 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#3b82f6">
+    
     <title>App BI - Panel de Control</title>
     
     <!-- ANTI-CACHÉ -->
@@ -14,13 +18,20 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
     <div id="app">
+        <!-- Toggle button siempre presente -->
         <button class="toggle-btn" @click="toggleSidebar" :class="{ 'hidden': sidebarOpen }">
             <i class="fas fa-bars"></i>
         </button>
+
+        <!-- Overlay para cerrar sidebar en móvil -->
+        <div class="sidebar-overlay" 
+             :class="{ 'active': sidebarOpen }" 
+             @click="sidebarOpen = false">
+        </div>
 
         <div class="layout" :class="{ 'sidebar-closed': !sidebarOpen }">
             <sidebar 
@@ -34,7 +45,7 @@
                 @open-user-management="showUserManagement = true">
             </sidebar>
 
-            <main class="main-content">
+            <main class="main-content" @click="handleMainClick">
                 <header class="top-bar">
                     <div class="header-left">
                         <button class="menu-toggle" @click="toggleSidebar">
@@ -191,11 +202,11 @@
         </user-management>
     </div>
 
-    <script src="KPICard.js?v=5"></script>
-    <script src="DashboardGrid.js?v=5"></script>
-    <script src="sidebar.js?v=5"></script>
-    <script src="API.js?v=5"></script>
-    <script src="UserManagement.js?v=5"></script>
+    <script src="KPICard.js?v=6"></script>
+    <script src="DashboardGrid.js?v=6"></script>
+    <script src="sidebar.js?v=6"></script>
+    <script src="API.js?v=6"></script>
+    <script src="UserManagement.js?v=6"></script>
     
     <script>
     const { createApp } = Vue;
@@ -232,9 +243,12 @@
             console.log('[DEBUG] rawTeamSk from localStorage:', rawTeamSk);
             console.log('[DEBUG] processed userTeamSk:', userTeamSk);
             
+            // Detectar si es móvil para estado inicial del sidebar
+            const isMobile = window.innerWidth <= 768;
+            
             return {
                 currentDashboard: 'daily',
-                sidebarOpen: true,
+                sidebarOpen: !isMobile, // Cerrado en móvil, abierto en desktop
                 loading: false,
                 showUserManagement: false,
                 
@@ -335,30 +349,75 @@
                 console.log('[DEBUG] Configured restaurant:', currentTeamSk);
             }
             
+            // Configurar event listeners
+            this.setupEventListeners();
+            
             this.loadRestaurants();
             this.loadDashboardData();
-            
-            if (window.innerWidth <= 768) {
-                this.sidebarOpen = false;
-            }
-            
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('.custom-dropdown')) {
-                    this.showRestaurantDropdown = false;
-                }
-            });
         },
         methods: {
+            setupEventListeners() {
+                // Cerrar dropdowns al hacer click fuera
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('.custom-dropdown')) {
+                        this.showRestaurantDropdown = false;
+                    }
+                });
+                
+                // Manejar resize con debounce
+                let resizeTimer;
+                window.addEventListener('resize', () => {
+                    clearTimeout(resizeTimer);
+                    resizeTimer = setTimeout(() => {
+                        const isMobile = window.innerWidth <= 768;
+                        if (!isMobile && !this.sidebarOpen) {
+                            // En desktop, abrir sidebar si está cerrado
+                            this.sidebarOpen = true;
+                        }
+                    }, 250);
+                });
+                
+                // Cerrar sidebar con Escape
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && this.sidebarOpen) {
+                        this.sidebarOpen = false;
+                    }
+                });
+                
+                // Prevenir scroll del body cuando sidebar abierto en móvil
+                this.$watch('sidebarOpen', (isOpen) => {
+                    const isMobile = window.innerWidth <= 768;
+                    if (isMobile) {
+                        document.body.style.overflow = isOpen ? 'hidden' : '';
+                    }
+                });
+            },
+            
             toggleSidebar() {
                 this.sidebarOpen = !this.sidebarOpen;
             },
             
+            handleMainClick() {
+                // En móvil, cerrar sidebar al tocar el contenido principal
+                if (window.innerWidth <= 768 && this.sidebarOpen) {
+                    this.sidebarOpen = false;
+                }
+            },
+            
             logout() {
+                // Limpiar overflow antes de salir
+                document.body.style.overflow = '';
                 apiService.logout();
             },
             
             async changeDashboard(dashboardId) {
                 this.currentDashboard = dashboardId;
+                
+                // Cerrar sidebar en móvil al cambiar de vista
+                if (window.innerWidth <= 768) {
+                    this.sidebarOpen = false;
+                }
+                
                 await this.loadDashboardData();
             },
             

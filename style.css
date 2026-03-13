@@ -19,6 +19,7 @@
     /* Fuente Apple System */
     --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
 }
+
 * {
     margin: 0;
     padding: 0;
@@ -37,32 +38,67 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
-/* Layout Principal */
-.layout {
+
+/* ============================================================
+   SIDEBAR MEJORADO - MOBILE FIRST
+   ============================================================ */
+
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height para móviles modernos */
+    position: fixed;
+    left: 0;
+    top: 0;
+    box-shadow: var(--shadow-lg);
     display: flex;
-    min-height: 100vh;
-    transition: var(--transition);
+    flex-direction: column;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+    border-right: 1px solid var(--border-color);
+    will-change: transform; /* Optimización de rendimiento */
 }
 
-/* FIX 1: Toggle button simplificado y funcional */
+/* Overlay oscuro cuando sidebar está abierto en móvil */
+.sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:transparent;
+    z-index: 999;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.sidebar-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Toggle button mejorado */
 .toggle-btn {
     position: fixed;
     top: 20px;
     left: 20px;
-    z-index: 1001;
+    z-index: 998; /* Menor que sidebar pero visible cuando está cerrado */
     background: var(--primary);
     color: white;
     border: none;
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
+    width: 44px; /* Tamaño táctil óptimo (44px mínimo) */
+    height: 44px;
+    border-radius: 12px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: var(--shadow-lg);
-    transition: var(--transition);
-    font-size: 1.2rem;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 1.25rem;
+    -webkit-tap-highlight-color: transparent; /* Eliminar highlight azul en móvil */
 }
 
 .toggle-btn:hover {
@@ -70,28 +106,46 @@ body {
     transform: scale(1.05);
 }
 
-/* Ocultar cuando sidebar está abierto */
-.toggle-btn.hidden {
+.toggle-btn:active {
+    transform: scale(0.95);
+}
+
+/* Cuando sidebar está abierto, esconder toggle y mostrar close */
+.layout:not(.sidebar-closed) .toggle-btn {
     opacity: 0;
     pointer-events: none;
+    transform: translateX(-20px);
 }
 
-/* Sidebar */
-.sidebar {
-    width: var(--sidebar-width);
-    background: var(--sidebar-bg);
-    height: 100vh;
-    position: fixed;
-    left: 0;
-    top: 0;
-    box-shadow: var(--shadow-lg);
-    display: flex;
-    flex-direction: column;
+/* Botón de cerrar dentro del sidebar (visible solo en móvil) */
+.sidebar .close-btn {
+    display: none; /* Oculto en desktop */
+    background: rgba(0, 0, 0, 0.05);
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 8px;
     transition: var(--transition);
-    z-index: 999;
-    border-right: 1px solid var(--border-color);
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
 }
 
+.sidebar .close-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--text-primary);
+}
+
+/* Layout Principal */
+.layout {
+    display: flex;
+    min-height: 100vh;
+    transition: var(--transition);
+}
+
+/* Sidebar Header */
 .sidebar-header {
     padding: 1.5rem;
     border-bottom: 1px solid var(--border-color);
@@ -109,16 +163,7 @@ body {
     color: var(--primary);
 }
 
-.close-btn {
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 0.5rem;
-    border-radius: 6px;
-    transition: var(--transition);
-}
-
+/* Navegación */
 .nav-menu {
     list-style: none;
     padding: 1rem;
@@ -223,14 +268,14 @@ body {
     flex-wrap: wrap;
 }
 
-/* FIX 2: Contenedor del filtro de restaurantes con flexbox */
+/* Contenedor del filtro de restaurantes con flexbox */
 .restaurant-filter {
     display: flex;
     align-items: center;
     gap: 0.75rem;
 }
 
-/* FIX 3: Estilo para el label/ícono del restaurante */
+/* Estilo para el label/ícono del restaurante */
 .restaurant-filter label {
     display: flex;
     align-items: center;
@@ -245,7 +290,7 @@ body {
     cursor: pointer;
 }
 
-/* FIX 4: Separador entre filtro y presets */
+/* Separador entre filtro y presets */
 .separator {
     width: 1px;
     height: 32px;
@@ -903,19 +948,24 @@ body {
     color: var(--primary);
 }
 
-/* Responsive */
-@media (max-width: 1200px) {
-    .secondary-metrics-grid {
-        grid-template-columns: repeat(2, 1fr);
+/* ============================================================
+   RESPONSIVE MEJORADO
+   ============================================================ */
+
+/* Tablet (768px - 1024px) */
+@media (max-width: 1024px) {
+    .main-content {
+        padding: 1.5rem;
     }
     
     .kpi-card-horizontal {
         flex-direction: column;
-        align-items: flex-start;
+        gap: 1rem;
     }
     
     .kpi-left {
         flex-direction: row;
+        align-items: center;
         border-right: none;
         border-bottom: 2px solid var(--bg-color);
         padding-right: 0;
@@ -926,54 +976,316 @@ body {
     .periods-container {
         width: 100%;
         overflow-x: auto;
-    }
-}
-
-@media (max-width: 768px) {
-    .sidebar {
-        width: 100%;
-        transform: translateX(-100%);
+        -webkit-overflow-scrolling: touch; /* Scroll suave en iOS */
+        gap: 1rem;
+        padding-bottom: 0.5rem; /* Espacio para scroll */
     }
     
-    .main-content {
-        margin-left: 0;
-        padding: 1rem;
-        max-width: 100vw;
-    }
-    
-    .menu-toggle {
-        display: block;
-    }
-    
-    .charts-section {
-        grid-template-columns: 1fr;
+    .period-box {
+        min-width: 100px;
+        flex-shrink: 0;
     }
     
     .secondary-metrics-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Móvil (hasta 768px) */
+@media (max-width: 768px) {
+    :root {
+        --sidebar-width: 100%; /* Sidebar full width en móvil */
     }
     
-    .filters-row {
+    /* Sidebar como drawer full screen */
+    .sidebar {
+        width: 85%; /* No ocupar todo para ver un poco el fondo */
+        max-width: 320px;
+        transform: translateX(-100%);
+        box-shadow: none;
+    }
+    
+    .sidebar.open {
+        transform: translateX(0);
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+    }
+    
+    /* Mostrar botón cerrar en móvil */
+    .sidebar .close-btn {
+        display: flex;
+    }
+    
+    /* Header del sidebar más compacto en móvil */
+    .sidebar-header {
+        padding: 1rem;
+        min-height: 60px;
+    }
+    
+    .sidebar-logo {
+        font-size: 1.125rem;
+    }
+    
+    /* Menú más táctil */
+    .nav-menu {
+        padding: 0.5rem;
+    }
+    
+    .nav-link {
+        padding: 1rem; /* Área táctil más grande */
+        font-size: 1rem;
+        border-radius: 12px;
+        margin-bottom: 0.25rem;
+    }
+    
+    .nav-link i {
+        font-size: 1.25rem;
+        width: 28px;
+        text-align: center;
+    }
+    
+    /* Main content ajustado */
+    .main-content {
+        margin-left: 0;
+        padding: 1rem;
+        padding-top: 80px; /* Espacio para el toggle button */
+        max-width: 100vw;
+        min-height: 100vh;
+    }
+    
+    /* Toggle button siempre visible en móvil cuando sidebar cerrado */
+    .toggle-btn {
+        top: 16px;
+        left: 16px;
+        display: flex !important;
+    }
+    
+    /* Header principal más compacto */
+    .top-bar {
         flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
     }
     
-    .custom-dropdown {
+    .header-left {
         width: 100%;
+        justify-content: space-between;
     }
     
+    .top-bar h1 {
+        font-size: 1.25rem;
+    }
+    
+    /* Filtros apilados */
     .date-filter-bar {
         flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+        padding: 1rem;
     }
     
-    /* FIX responsive para filtros */
+    .filters-left {
+        flex-direction: column;
+        width: 100%;
+        gap: 0.75rem;
+    }
+    
     .restaurant-filter {
         width: 100%;
     }
     
     .restaurant-select {
+        width: 100%;
+        min-width: unset;
+    }
+    
+    .separator {
+        display: none; /* Ocultar separador en móvil */
+    }
+    
+    .date-presets {
+        width: 100%;
+        justify-content: stretch;
+    }
+    
+    .preset-btn {
         flex: 1;
+        justify-content: center;
+    }
+    
+    .date-picker-wrapper {
+        width: 100%;
+    }
+    
+    .date-input {
+        width: 100%;
+    }
+    
+    /* KPI cards en columna */
+    .dashboard-grid {
+        gap: 0.75rem;
+    }
+    
+    .kpi-card-horizontal {
+        padding: 1rem;
+        border-radius: 12px;
+    }
+    
+    .kpi-icon-horiz {
+        width: 36px;
+        height: 36px;
+        font-size: 1rem;
+    }
+    
+    .period-value {
+        font-size: 1.25rem;
+    }
+    
+    .period-diff {
+        font-size: 0.75rem;
+    }
+    
+    /* Métricas secundarias en columna */
+    .secondary-metrics-grid {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+    
+    .secondary-metric-card {
+        padding: 1rem;
+    }
+    
+    /* Tablas con scroll horizontal */
+    .table-responsive {
+        margin: 0 -1rem;
+        padding: 0 1rem;
+        width: calc(100% + 2rem);
+    }
+    
+    .pm-table,
+    .users-table,
+    .data-table {
+        font-size: 0.8125rem;
+    }
+    
+    .pm-table th,
+    .pm-table td,
+    .users-table th,
+    .users-table td {
+        padding: 0.75rem 0.5rem;
+        white-space: nowrap;
+    }
+    
+    /* Gráficos más compactos */
+    .charts-section {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    .chart-container {
+        padding: 1rem;
+        min-height: 300px;
+    }
+    
+    .chart-wrapper-secure {
+        height: 250px;
+        min-height: 250px;
+    }
+    
+    /* User info en sidebar más compacto */
+    .user-info {
+        margin: 0.5rem;
+        padding: 0.75rem;
+    }
+    
+    .user-avatar {
+        width: 36px;
+        height: 36px;
+        font-size: 0.75rem;
+    }
+    
+    /* Modal de gestión de usuarios full screen */
+    .user-management-modal {
+        max-width: 100%;
+        max-height: 100vh;
+        border-radius: 0;
+        height: 100vh;
+    }
+    
+    .modal-body {
+        padding: 1rem;
     }
 }
+
+/* Móvil pequeño (hasta 480px) */
+@media (max-width: 480px) {
+    .periods-container {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+    }
+    
+    .period-box {
+        min-width: unset;
+        background: var(--bg-color);
+        padding: 0.75rem;
+        border-radius: 8px;
+    }
+    
+    .pm-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .pm-stats {
+        width: 100%;
+        justify-content: space-between;
+    }
+    
+    .kpi-title-horiz {
+        font-size: 0.75rem;
+    }
+    
+    .period-value {
+        font-size: 1.125rem;
+    }
+}
+
+/* Orientación landscape en móviles */
+@media (max-height: 600px) and (orientation: landscape) {
+    .sidebar {
+        width: 280px;
+        overflow-y: auto;
+    }
+    
+    .nav-menu {
+        flex: 0 0 auto;
+    }
+    
+    .sidebar-footer {
+        position: relative;
+    }
+}
+
+/* iOS safe areas (notch, home indicator) */
+@supports (padding-top: env(safe-area-inset-top)) {
+    .sidebar {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    
+    .main-content {
+        padding-top: max(80px, env(safe-area-inset-top) + 60px);
+    }
+    
+    .toggle-btn {
+        top: max(16px, env(safe-area-inset-top) + 8px);
+    }
+}
+
 /* Wrapper seguro para charts */
 .chart-wrapper-secure {
     position: relative;
@@ -1037,11 +1349,36 @@ body {
     flex-shrink: 0;
 }
 
+.user-details {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.user-name {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.user-role {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.logout-icon {
+    margin-left: auto;
+    color: #ef4444;
+    font-size: 1rem;
+}
+
 .user-info span {
     font-size: 0.9375rem;
     font-weight: 600;
     color: var(--text-primary);
 }
+
 /* Ajustes tipográficos Apple System */
 h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
@@ -1095,11 +1432,13 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
     letter-spacing: -0.02em;
 }
+
 .metric-value {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
     font-weight: 600;
     letter-spacing: -0.03em;
 }
+
 /* ============================================================
    PRODUCT MIX - ESTILOS ESENCIALES
    ============================================================ */
@@ -1254,7 +1593,7 @@ h1, h2, h3, h4, h5, h6 {
     text-align: right !important;
 }
 
-/* Responsive */
+/* Responsive Product Mix */
 @media (max-width: 768px) {
     .pm-header {
         flex-direction: column;
@@ -1274,6 +1613,7 @@ h1, h2, h3, h4, h5, h6 {
         min-width: 100px;
     }
 }
+
 /* ============================================================
    VENTAS POR HORA - ESTILOS ADICIONALES
    ============================================================ */
@@ -1353,6 +1693,7 @@ h1, h2, h3, h4, h5, h6 {
 .hours-table tr[style*="border-left: 4px solid #8b5cf6"] {
     background: linear-gradient(90deg, #f5f3ff 0%, #ffffff 100%);
 }
+
 /* ============================================================
    USER MANAGEMENT - ESTILOS DEL MODAL
    ============================================================ */
@@ -1841,7 +2182,7 @@ h1, h2, h3, h4, h5, h6 {
     transform: translateX(4px);
 }
 
-/* Responsive */
+/* Responsive User Management */
 @media (max-width: 768px) {
     .user-management-modal {
         max-width: 100%;

@@ -2,25 +2,29 @@ const Sidebar = {
     props: ['currentDashboard', 'isOpen', 'userRole', 'unifiedTeamSk'],
     emits: ['change-dashboard', 'close-sidebar', 'logout', 'open-user-management'],
     template: `
-        <aside class="sidebar" :class="{ 'open': isOpen }">
+        <aside class="sidebar" :class="{ 'open': isOpen }" @click.stop>
             <div class="sidebar-header">
                 <div class="sidebar-logo">
                     <i class="fas fa-chart-line"></i>
                     <span>App BI</span>
                 </div>
-                <button class="close-btn" @click="closeSidebar">
+                <!-- Botón cerrar visible en todos los dispositivos -->
+                <button class="close-btn" @click="closeSidebar" aria-label="Cerrar menú">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             
             <nav>
-                <ul class="nav-menu">
+                <ul class="nav-menu" role="menu">
                     <li class="nav-item" 
                         v-for="dash in allDashboards" 
                         :key="dash.id"
-                        @click="selectDashboard(dash.id)">
-                        <button class="nav-link" :class="{ active: currentDashboard === dash.id }">
-                            <i :class="dash.icon"></i>
+                        role="none">
+                        <button class="nav-link" 
+                                :class="{ active: currentDashboard === dash.id }"
+                                @click="selectDashboard(dash.id)"
+                                role="menuitem">
+                            <i :class="dash.icon" aria-hidden="true"></i>
                             <span>{{ dash.name }}</span>
                         </button>
                     </li>
@@ -39,13 +43,13 @@ const Sidebar = {
             </div>
             
             <div class="sidebar-footer">
-                <div class="user-info" @click="logout" style="cursor: pointer;">
+                <div class="user-info" @click="logout" role="button" tabindex="0">
                     <div class="user-avatar">{{ userInitials }}</div>
-                    <div style="display: flex; flex-direction: column;">
-                        <span style="font-weight: 600;">{{ displayName }}</span>
-                        <small style="color: var(--text-secondary); font-size: 0.75rem;">{{ userRole === 'admin' ? 'Administrador' : 'Restaurante' }}</small>
+                    <div class="user-details">
+                        <span class="user-name">{{ displayName }}</span>
+                        <small class="user-role">{{ userRole === 'admin' ? 'Administrador' : 'Restaurante ' + unifiedTeamSk }}</small>
                     </div>
-                    <i class="fas fa-sign-out-alt" style="margin-left: auto; color: #ef4444;"></i>
+                    <i class="fas fa-sign-out-alt logout-icon" aria-hidden="true"></i>
                 </div>
             </div>
         </aside>
@@ -72,9 +76,6 @@ const Sidebar = {
     methods: {
         selectDashboard(id) {
             this.$emit('change-dashboard', id);
-            if (window.innerWidth <= 768) {
-                this.$emit('close-sidebar');
-            }
         },
         closeSidebar() {
             this.$emit('close-sidebar');
@@ -85,9 +86,6 @@ const Sidebar = {
         openUserManagement() {
             console.log('[Sidebar] Abriendo gestión de usuarios...');
             this.$emit('open-user-management');
-            if (window.innerWidth <= 768) {
-                this.$emit('close-sidebar');
-            }
         }
     }
 };
