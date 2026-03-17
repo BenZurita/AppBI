@@ -174,19 +174,19 @@ const DashboardGrid = {
                                     </td>
                                     
                                     <td class="text-right">
-                                        <span style="font-weight: 600; color: #475569;">
+                                        <span style="font-weight: 600; color: #170303;">
                                             {{ formatNumber(row.total_ordenes) }}
                                         </span>
                                     </td>
                                     
                                     <td class="text-right">
-                                        <span style="font-weight: 700; color: #059669; font-family: monospace;">
+                                        <span style="font-weight: 700; color: #0c6b4d; font-family: monospace;">
                                             {{ formatCurrency(row.total_ventas_usd) }}
                                         </span>
                                     </td>
                                     
                                     <td class="text-right">
-                                        <span style="font-weight: 500; color: #6b7280;">
+                                        <span style="font-weight: 500; color: #170303;">
                                             {{ formatCurrency(row.promedio_diario) }}
                                         </span>
                                     </td>

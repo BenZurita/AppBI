@@ -1497,7 +1497,7 @@ h1, h2, h3, h4, h5, h6 {
     padding: 1rem;
     text-align: left;
     font-weight: 600;
-    color: #475569;
+    color: #010914;
     font-size: 0.8125rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1523,7 +1523,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .pm-total {
-    background: #1e293b !important;
+    background: #e8ebf0 !important;
     color: white !important;
     font-weight: 700;
     font-size: 1.05rem;
@@ -1571,14 +1571,14 @@ h1, h2, h3, h4, h5, h6 {
 
 .pm-bar-text {
     font-weight: 700;
-    color: #1e293b;
+    color: #02060c;
     font-size: 0.875rem;
     min-width: 45px;
     text-align: right;
 }
 
 .pm-total .pm-bar-bg {
-    background: rgba(255,255,255,0.3);
+    background: rgba(0, 0, 0, 0.3);
 }
 
 .pm-total .pm-bar-fill {
@@ -1586,7 +1586,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .pm-total .pm-bar-text {
-    color: white;
+    color: rgb(9, 0, 0);
 }
 
 .text-right {
@@ -1632,16 +1632,16 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .hours-table-section {
-    background: white;
+    background: rgb(255, 255, 255);
     border-radius: 12px;
     padding: 1.5rem;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px -1px rgba(167, 152, 152, 0.1);
 }
 
 .section-subtitle {
     font-size: 1.125rem;
     font-weight: 600;
-    color: #1e293b;
+    color: #fdfdfd;
     margin: 0 0 1rem 0;
     display: flex;
     align-items: center;
