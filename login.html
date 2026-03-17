@@ -190,7 +190,7 @@
     </div>
 
     <script>
-        const API_BASE_URL = 'http://localhost:5000/api';
+        const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:5000/api`;
         
         // Verificar si ya está autenticado
         if (localStorage.getItem('token')) {
@@ -234,9 +234,10 @@
                 localStorage.setItem('token', data.access_token);
                 localStorage.setItem('username', data.username);
                 localStorage.setItem('role', data.role);
-                if (data.restaurant_code) {
-                    localStorage.setItem('restaurant_code', data.restaurant_code);
-                }
+                localStorage.setItem('can_view_all', data.can_view_all ? 'true' : 'false');
+                if (data.unified_team_sk !== undefined) {
+               localStorage.setItem('unified_team_sk', data.unified_team_sk || '');
+}
                 
                 // Redirigir al dashboard
                 window.location.href = '/';

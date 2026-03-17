@@ -4,13 +4,14 @@ const DashboardGrid = {
     },
     props: ['kpis', 'secondaryMetrics', 'charts', 'loading', 'tableData', 'tableColumns', 'isTableMode', 'isHoursMode', 'hoursData'],
     data() {
-        return {
-            sortKey: '',
-            sortOrder: 'asc',
-            chartInstances: {},
-            hoursChartInstance: null
-        }
-    },
+    return {
+        sortKey: '',
+        sortOrder: 'asc',
+        chartInstances: {},
+        hoursChartInstance: null,
+        _renderPending: false   
+    }
+},
     template: `
         <div>
             <div v-if="loading" class="loading-overlay">
@@ -307,19 +308,18 @@ const DashboardGrid = {
         }
     },
     mounted() {
-        if (this.isHoursMode && this.hoursData.chart) {
-            this.$nextTick(() => setTimeout(() => this.renderHoursChart(), 100));
-        } else if (!this.isTableMode && !this.isHoursMode && this.charts && this.charts.length > 0) {
-            this.$nextTick(() => setTimeout(() => this.renderCharts(), 100));
-        }
-    },
-    updated() {
-        if (this.isHoursMode && this.hoursData.chart) {
-            this.$nextTick(() => this.renderHoursChart());
-        } else if (!this.isTableMode && !this.isHoursMode && this.charts && this.charts.length > 0) {
-            this.$nextTick(() => this.renderCharts());
-        }
-    },
+    this.$nextTick(() => setTimeout(() => this._renderAll(), 150));
+},
+updated() {
+    if (this._renderPending) return;
+    this._renderPending = true;
+    this.$nextTick(() => {
+        setTimeout(() => {
+            this._renderAll();
+            this._renderPending = false;
+        }, 50);
+    });
+},
     beforeUnmount() {
         Object.values(this.chartInstances).forEach(chart => {
             if (chart) chart.destroy();
@@ -328,7 +328,13 @@ const DashboardGrid = {
             this.hoursChartInstance.destroy();
         }
     },
-    methods: {
+    methods: { _renderAll() {
+    if (this.isHoursMode && this.hoursData && this.hoursData.chart) {
+        this.renderHoursChart();
+    } else if (!this.isTableMode && !this.isHoursMode && this.charts && this.charts.length > 0) {
+        this.renderCharts();
+    }
+},
         sortBy(key) {
             if (this.sortKey === key) {
                 this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
@@ -366,20 +372,29 @@ const DashboardGrid = {
             return 'min';
         },
         renderHoursChart() {
-            if (!this.hoursData.chart) return;
-            
-            const canvas = document.getElementById('hoursChart');
-            if (!canvas) {
-                console.warn('Canvas hoursChart no encontrado');
-                return;
-            }
-            
-            if (this.hoursChartInstance) {
-                this.hoursChartInstance.destroy();
-            }
-            
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return;
+    if (!this.hoursData || !this.hoursData.chart) return;
+    
+    const canvas = document.getElementById('hoursChart');
+    if (!canvas) {
+        console.warn('Canvas hoursChart no encontrado');
+        return;
+    }
+    
+    // ← NUEVO: destruir instancia anterior de forma segura
+    if (this.hoursChartInstance) {
+        try { this.hoursChartInstance.destroy(); } catch(e) {}
+        this.hoursChartInstance = null;
+    }
+    
+    // Limpiar registro interno de Chart.js para este canvas
+    // Limpiar registro interno de Chart.js
+const existingChart = Chart.getChart(canvas);
+if (existingChart) {
+    try { existingChart.destroy(); } catch(e) {}
+}
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
             
             const data = this.hoursData.chart;
             

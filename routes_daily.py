@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy import text
@@ -15,26 +15,43 @@ router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
 # ============================================================
-# HELPERS
+# HELPERS - ZONA HORARIA CARACAS UTC-4
 # ============================================================
 
+# Caracas UTC-4 (no usa horario de verano)
+CARACAS_OFFSET = timedelta(hours=-4)
+CARACAS_TZ = timezone(CARACAS_OFFSET)
+
+
+def get_caracas_now() -> datetime:
+    """Obtiene la hora actual en zona Caracas UTC-4"""
+    return datetime.now(CARACAS_TZ)
+
+
 def date_to_date_id(d: datetime) -> int:
-    """Convierte datetime a date_id (YYYYMMDD)"""
+    """Convierte datetime a date_id (YYYYMMDD) en zona Caracas"""
+    # Asegurar que la fecha esté en zona Caracas
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=CARACAS_TZ)
     return int(d.strftime("%Y%m%d"))
 
-def date_id_to_date(date_id: int) -> datetime:
-    """Convierte date_id a datetime"""
-    return datetime.strptime(str(date_id), "%Y%m%d")
 
-def get_week_range(date_id: int) -> tuple[int, int]:
-    """Retorna inicio (lunes) y fin (domingo) de la semana"""
+def date_id_to_date(date_id: int) -> datetime:
+    """Convierte date_id a datetime en zona Caracas"""
+    d = datetime.strptime(str(date_id), "%Y%m%d")
+    return d.replace(tzinfo=CARACAS_TZ)
+
+
+def get_week_range(date_id: int) -> Tuple[int, int]:
+    """Retorna inicio (lunes) y fin (domingo) de la semana en Caracas"""
     d = date_id_to_date(date_id)
     monday = d - timedelta(days=d.weekday())
     sunday = monday + timedelta(days=6)
     return date_to_date_id(monday), date_to_date_id(sunday)
 
-def get_month_range(date_id: int) -> tuple[int, int]:
-    """Retorna inicio y fin del mes"""
+
+def get_month_range(date_id: int) -> Tuple[int, int]:
+    """Retorna inicio y fin del mes en Caracas"""
     d = date_id_to_date(date_id)
     start = d.replace(day=1)
     if d.month == 12:
@@ -113,7 +130,7 @@ async def dashboard_daily(
     restaurant_filter: RestaurantFilter = None
 ):
     """
-    Dashboard diario optimizado - solo lectura de tablas pre-calculadas
+    Dashboard diario optimizado - zona horaria Caracas UTC-4
     """
     # Aplicar filtro de seguridad
     effective_restaurant = restaurant
@@ -124,13 +141,24 @@ async def dashboard_daily(
         else:
             print(f"[DEBUG] Admin view, restaurant param: {restaurant}")
     
-    # Validar fecha
-    try:
-        hoy = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
-    except ValueError:
-        raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
+    # Obtener fecha en zona Caracas
+    now_caracas = get_caracas_now()
+    
+    if date:
+        try:
+            parsed = datetime.strptime(date, "%Y-%m-%d")
+            hoy = parsed.replace(tzinfo=CARACAS_TZ)
+            preset = "custom"
+        except ValueError:
+            raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
+    else:
+        hoy = now_caracas
     
     hoy_id = date_to_date_id(hoy)
+    
+    print(f"[DEBUG] Caracas now: {now_caracas.strftime('%Y-%m-%d %H:%M %z')}")
+    print(f"[DEBUG] Effective date: {hoy.strftime('%Y-%m-%d')}")
+    print(f"[DEBUG] Date ID: {hoy_id}")
     
     # unified_team_sk para filtrar (None si es "all")
     unified_team_sk = None if effective_restaurant == "all" else effective_restaurant
@@ -146,18 +174,25 @@ async def dashboard_daily(
         cache = None
 
     async with AsyncSessionLocal() as session:
-        # Calcular fechas de comparación
-        ayer = hoy - timedelta(days=1)
-        hoy_sp = hoy - timedelta(days=7)
-        ayer_sp = ayer - timedelta(days=7)
+        # Calcular fechas de comparación en zona Caracas
         
+        # AYER: restar 1 día
+        ayer = hoy - timedelta(days=1)
         ayer_id = date_to_date_id(ayer)
+        
+        # MISMO DÍA SEMANA PASADA: restar 7 días
+        hoy_sp = hoy - timedelta(days=7)
         hoy_sp_id = date_to_date_id(hoy_sp)
+        
+        # AYER de la semana pasada: restar 8 días
+        ayer_sp = hoy - timedelta(days=8)
         ayer_sp_id = date_to_date_id(ayer_sp)
         
+        # Semanas
         sem_inicio, sem_fin = get_week_range(hoy_id)
         sem_pas_inicio, sem_pas_fin = get_week_range(hoy_sp_id)
         
+        # Meses
         mes_inicio, mes_fin = get_month_range(hoy_id)
         mes_pas_date = hoy.replace(day=1) - timedelta(days=1)
         mes_pas_inicio, mes_pas_fin = get_month_range(date_to_date_id(mes_pas_date))
@@ -387,9 +422,11 @@ async def dashboard_daily(
             "success": True,
             "meta": {
                 "reference_date": hoy.strftime("%Y-%m-%d"),
+                "caracas_time": now_caracas.strftime("%Y-%m-%d %H:%M %z"),
                 "preset": preset,
                 "restaurant_filter": effective_restaurant,
-                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "generated_at": get_caracas_now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timezone": "America/Caracas (UTC-4)",
             },
             "data": {
                 "kpis": [
@@ -494,7 +531,7 @@ async def dashboard_daily(
 
 
 # ============================================================
-# ENDPOINT: Product Mix (reemplaza a Detalle de Restaurantes)
+# ENDPOINT: Product Mix
 # ============================================================
 
 @router.get("/dashboard/productmix")
@@ -505,8 +542,7 @@ async def dashboard_product_mix(
     restaurant_filter: RestaurantFilter = None
 ):
     """
-    Product Mix: Ventas por producto en un rango de fechas
-    Muestra: product_name, cantidad, total_usd, % peso del producto
+    Product Mix: Ventas por producto en un rango de fechas (zona Caracas)
     """
     # Aplicar filtro de seguridad
     effective_restaurant = restaurant
@@ -518,8 +554,11 @@ async def dashboard_product_mix(
             print(f"[DEBUG] Admin Product Mix, restaurant: {restaurant}")
     
     try:
-        date_start = int(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d"))
-        date_end = int(datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d"))
+        # Convertir fechas usando zona Caracas
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=CARACAS_TZ)
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=CARACAS_TZ)
+        date_start = int(start_dt.strftime("%Y%m%d"))
+        date_end = int(end_dt.strftime("%Y%m%d"))
     except ValueError:
         raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
 
@@ -597,7 +636,8 @@ async def dashboard_product_mix(
                 "table": table_data,
                 "period": {"start": start_date, "end": end_date},
                 "restaurant_filter": effective_restaurant,
-                "total_products": len(table_data) - 1
+                "total_products": len(table_data) - 1,
+                "timezone": "America/Caracas (UTC-4)"
             },
         }
 
@@ -608,8 +648,10 @@ async def dashboard_product_mix(
                 pass
 
         return response
-    # ============================================================
-# ENDPOINT: Ventas por Hora (con períodos del día)
+
+
+# ============================================================
+# ENDPOINT: Ventas por Hora
 # ============================================================
 
 @router.get("/dashboard/hours")
@@ -620,8 +662,7 @@ async def dashboard_hours(
     restaurant_filter: RestaurantFilter = None
 ):
     """
-    Ventas por Hora: Análisis de ventas por período del día
-    Períodos: Almuerzo (11-15), Media Tarde (15-18), Cena (18-22), Late Night (22-01)
+    Ventas por Hora: Análisis de ventas por período del día (zona Caracas)
     """
     # Aplicar filtro de seguridad
     effective_restaurant = restaurant
@@ -633,8 +674,11 @@ async def dashboard_hours(
             print(f"[DEBUG] Admin Hours, restaurant: {restaurant}")
     
     try:
-        date_start = int(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d"))
-        date_end = int(datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d"))
+        # Convertir fechas usando zona Caracas
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=CARACAS_TZ)
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=CARACAS_TZ)
+        date_start = int(start_dt.strftime("%Y%m%d"))
+        date_end = int(end_dt.strftime("%Y%m%d"))
     except ValueError:
         raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
 
@@ -673,7 +717,6 @@ async def dashboard_hours(
         hourly_rows = hourly_result.fetchall()
 
         # Query: Datos agregados por período para la tabla
-                # Query: Datos agregados por período para la tabla
         period_sql = text(f"""
             WITH period_data AS (
                 SELECT 
@@ -783,7 +826,8 @@ async def dashboard_hours(
                 },
                 "periods_table": period_data,
                 "period": {"start": start_date, "end": end_date},
-                "restaurant_filter": effective_restaurant
+                "restaurant_filter": effective_restaurant,
+                "timezone": "America/Caracas (UTC-4)"
             },
         }
 

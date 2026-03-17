@@ -14,19 +14,16 @@ from routes_daily import router as dashboard_router
 
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
-REDIS_URL    = os.environ.get("CACHE_REDIS_URL", "redis://localhost:6379/0")
-FRONTEND_DIR = Path(__file__).parent
-
+REDIS_URL = os.environ.get("CACHE_REDIS_URL", "redis://localhost:6379/0")
 
 # --- Lifespan (startup / shutdown) -------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_cache()
-    print("OK  Cache inicializado con Redis")
+    print("OK  Cache inicializado")
     yield
     print("--  App cerrada")
-
 
 # --- App ---------------------------------------------------------------------
 
@@ -37,12 +34,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# --- CORS --------------------------------------------------------------------
+# --- CORS - PERMITIR TODOS LOS ORIGENES PARA PRUEBAS -------------------------
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,  # ✅ CORREGIDO: True para autenticación JWT
+    allow_origins=["*"],  # ⚠️ Para pruebas. En producción, especifica dominios
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -63,7 +60,6 @@ async def clear_cache_endpoint():
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
-
 @app.get("/api/admin/cache/stats", tags=["admin"])
 async def cache_stats():
     try:
@@ -77,28 +73,29 @@ async def cache_stats():
             "data": {
                 "used_memory_human": info.get("used_memory_human"),
                 "connected_clients": info.get("connected_clients"),
-                "total_keys":        db_size,
+                "total_keys": db_size,
             },
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
-
 # --- Servir frontend ---------------------------------------------------------
 
-app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+# Obtener directorio actual
+FRONTEND_DIR = Path(__file__).parent
 
+# Servir archivos estáticos
+app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 @app.get("/")
 async def serve_index():
     return FileResponse(FRONTEND_DIR / "index.html")
 
-
 @app.get("/login.html")
 async def serve_login():
     return FileResponse(FRONTEND_DIR / "login.html")
 
-
+# Servir otros archivos estáticos (JS, CSS)
 @app.get("/{filename}")
 async def serve_file(filename: str):
     # No servir rutas de API como archivos estáticos

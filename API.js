@@ -1,4 +1,36 @@
-const API_BASE_URL = 'http://localhost:5000/api';
+// =========================================================================
+// DETECCIÓN AUTOMÁTICA DE ENTORNO
+// =========================================================================
+
+const hostname = window.location.hostname;
+const port = window.location.port;
+
+// Detectar tipo de entorno
+const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+const isIPLocal = hostname.startsWith('192.168.') || 
+                  hostname.startsWith('10.') || 
+                  hostname.startsWith('172.16.');
+const isNgrok = hostname.includes('ngrok') || hostname.includes('ngrok-free');
+const isGitHubCodespace = hostname.includes('github.dev');
+
+// URL base según el entorno
+let API_BASE_URL;
+
+if (isLocalhost) {
+    // Misma PC: localhost
+    API_BASE_URL = 'http://localhost:5000/api';
+} else if (isIPLocal || isNgrok || isGitHubCodespace) {
+    // Misma red (192.168.x.x) o túneles: usar el mismo hostname que el frontend
+    API_BASE_URL = `${window.location.protocol}//${hostname}:${port || 5000}/api`;
+} else {
+    // Producción: mismo origen
+    API_BASE_URL = `${window.location.origin}/api`;
+}
+
+console.log('[DEBUG] Hostname:', hostname);
+console.log('[DEBUG] isLocalhost:', isLocalhost);
+console.log('[DEBUG] isIPLocal:', isIPLocal);
+console.log('[DEBUG] API_BASE_URL:', API_BASE_URL);
 
 const apiService = {
 
@@ -11,38 +43,45 @@ const apiService = {
         formData.append('username', username);
         formData.append('password', password);
 
-        const response = await fetch(`${API_BASE_URL}/auth/token`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: formData,
-        });
+        console.log('[LOGIN] Enviando a:', `${API_BASE_URL}/auth/token`);
 
-        const data = await response.json();
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData,
+            });
 
-        if (!response.ok) {
-            throw new Error(data.detail || 'Error de autenticación');
+            console.log('[LOGIN] Status:', response.status);
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || `Error ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('[DEBUG] Login response:', data);
+
+            localStorage.setItem('token', data.access_token);
+            localStorage.setItem('username', data.username);
+            localStorage.setItem('role', data.role);
+            localStorage.setItem('can_view_all', data.can_view_all ? 'true' : 'false');
+            
+            if (data.hasOwnProperty('unified_team_sk')) {
+                const valueToStore = data.unified_team_sk || '';
+                localStorage.setItem('unified_team_sk', valueToStore);
+                console.log('[DEBUG] Saved unified_team_sk:', valueToStore);
+            } else {
+                localStorage.removeItem('unified_team_sk');
+                console.log('[DEBUG] No unified_team_sk key in response');
+            }
+
+            return data;
+
+        } catch (error) {
+            console.error('[LOGIN] Error:', error);
+            throw error;
         }
-
-        // DEBUG: Log de la respuesta
-        console.log('[DEBUG] Login response:', data);
-
-        localStorage.setItem('token', data.access_token);
-        localStorage.setItem('username', data.username);
-        localStorage.setItem('role', data.role);
-        localStorage.setItem('can_view_all', data.can_view_all ? 'true' : 'false');
-        
-        // CORREGIDO: Siempre guardar el valor que viene del backend si existe la key
-        // para mantener sincronización, incluso si es null o vacío
-        if (data.hasOwnProperty('unified_team_sk')) {
-            const valueToStore = data.unified_team_sk || '';
-            localStorage.setItem('unified_team_sk', valueToStore);
-            console.log('[DEBUG] Saved unified_team_sk:', valueToStore);
-        } else {
-            localStorage.removeItem('unified_team_sk');
-            console.log('[DEBUG] No unified_team_sk key in response');
-        }
-
-        return data;
     },
 
     logout() {
@@ -68,7 +107,6 @@ const apiService = {
 
     getUnifiedTeamSk() {
         const raw = localStorage.getItem('unified_team_sk');
-        // CORREGIDO: Filtrar valores inválidos explícitamente
         if (raw === null || raw === 'null' || raw === 'undefined' || raw === undefined) {
             return null;
         }
