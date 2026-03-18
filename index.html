@@ -18,7 +18,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
     <div id="app">
@@ -26,12 +26,6 @@
         <button class="toggle-btn" @click="toggleSidebar" :class="{ 'hidden': sidebarOpen }">
             <i class="fas fa-bars"></i>
         </button>
-
-        <!-- Overlay para cerrar sidebar en móvil -->
-        <div class="sidebar-overlay" 
-             :class="{ 'active': sidebarOpen }" 
-             @click="sidebarOpen = false">
-        </div>
 
         <div class="layout" :class="{ 'sidebar-closed': !sidebarOpen }">
             <sidebar 
@@ -45,7 +39,7 @@
                 @open-user-management="showUserManagement = true">
             </sidebar>
 
-            <main class="main-content" @click="handleMainClick">
+            <main class="main-content">
                 <header class="top-bar">
                     <div class="header-left">
                         <button class="menu-toggle" @click="toggleSidebar">
@@ -67,8 +61,8 @@
                     </div>
                 </header>
 
-                <!-- FILTROS DASHBOARD PRINCIPAL (Daily Sales) -->
-                <div v-if="currentDashboard === 'daily'" class="date-filter-bar">
+                <!-- FILTROS DASHBOARD PRINCIPAL (Daily Sales y Venta por Caja) -->
+                <div v-if="currentDashboard === 'daily' || currentDashboard === 'salesbyregister'" class="date-filter-bar">
                     <div class="filters-left">
                         <div v-if="isAdmin" class="restaurant-filter">
                             <label for="restaurant-select">
@@ -188,6 +182,7 @@
                     :table-columns="tableColumns"
                     :is-table-mode="currentDashboard === 'productmix'"
                     :is-hours-mode="currentDashboard === 'hours'"
+                    :is-sales-by-register-mode="currentDashboard === 'salesbyregister'"
                     :hours-data="hoursData"
                     :loading="loading">
                 </dashboard-grid>
@@ -202,11 +197,11 @@
         </user-management>
     </div>
 
-    <script src="KPICard.js?v=6"></script>
-    <script src="DashboardGrid.js?v=6"></script>
-    <script src="sidebar.js?v=6"></script>
-    <script src="API.js?v=6"></script>
-    <script src="UserManagement.js?v=6"></script>
+    <script src="KPICard.js?v=7"></script>
+    <script src="DashboardGrid.js?v=7"></script>
+    <script src="sidebar.js?v=7"></script>
+    <script src="API.js?v=7"></script>
+    <script src="UserManagement.js?v=7"></script>
     
     <script>
     const { createApp } = Vue;
@@ -243,12 +238,11 @@
             console.log('[DEBUG] rawTeamSk from localStorage:', rawTeamSk);
             console.log('[DEBUG] processed userTeamSk:', userTeamSk);
             
-            // Detectar si es móvil para estado inicial del sidebar
             const isMobile = window.innerWidth <= 768;
             
             return {
                 currentDashboard: 'daily',
-                sidebarOpen: !isMobile, // Cerrado en móvil, abierto en desktop
+                sidebarOpen: !isMobile,
                 loading: false,
                 showUserManagement: false,
                 
@@ -295,6 +289,7 @@
             dashboardTitle() {
                 const titles = {
                     'daily': 'Daily Sales',
+                    'salesbyregister': 'Venta por Caja',
                     'productmix': 'Product Mix',
                     'hours': 'Ventas por Hora'
                 };
@@ -349,7 +344,6 @@
                 console.log('[DEBUG] Configured restaurant:', currentTeamSk);
             }
             
-            // Configurar event listeners
             this.setupEventListeners();
             
             this.loadRestaurants();
@@ -357,34 +351,23 @@
         },
         methods: {
             setupEventListeners() {
-                // Cerrar dropdowns al hacer click fuera
                 document.addEventListener('click', (e) => {
                     if (!e.target.closest('.custom-dropdown')) {
                         this.showRestaurantDropdown = false;
                     }
                 });
                 
-                // Manejar resize con debounce
                 let resizeTimer;
                 window.addEventListener('resize', () => {
                     clearTimeout(resizeTimer);
                     resizeTimer = setTimeout(() => {
                         const isMobile = window.innerWidth <= 768;
                         if (!isMobile && !this.sidebarOpen) {
-                            // En desktop, abrir sidebar si está cerrado
                             this.sidebarOpen = true;
                         }
                     }, 250);
                 });
                 
-                // Cerrar sidebar con Escape
-                document.addEventListener('keydown', (e) => {
-                    if (e.key === 'Escape' && this.sidebarOpen) {
-                        this.sidebarOpen = false;
-                    }
-                });
-                
-                // Prevenir scroll del body cuando sidebar abierto en móvil
                 this.$watch('sidebarOpen', (isOpen) => {
                     const isMobile = window.innerWidth <= 768;
                     if (isMobile) {
@@ -397,15 +380,7 @@
                 this.sidebarOpen = !this.sidebarOpen;
             },
             
-            handleMainClick() {
-                // En móvil, cerrar sidebar al tocar el contenido principal
-                if (window.innerWidth <= 768 && this.sidebarOpen) {
-                    this.sidebarOpen = false;
-                }
-            },
-            
             logout() {
-                // Limpiar overflow antes de salir
                 document.body.style.overflow = '';
                 apiService.logout();
             },
@@ -413,7 +388,6 @@
             async changeDashboard(dashboardId) {
                 this.currentDashboard = dashboardId;
                 
-                // Cerrar sidebar en móvil al cambiar de vista
                 if (window.innerWidth <= 768) {
                     this.sidebarOpen = false;
                 }
@@ -485,10 +459,91 @@
                 await this.loadDashboardData();
             },
             
+            prepareSalesByRegisterData(chartMain) {
+                if (!chartMain || !chartMain.labels) return { labels: [], datasets: [] };
+                
+                const periodLabels = { hoy: 'Hoy', ayer: 'Ayer', semana: 'Esta Semana', mes: 'Este Mes' };
+                const periodColors = {
+                    hoy: '#10b981',
+                    ayer: '#6b7280',
+                    semana: '#3b82f6',
+                    mes: '#f59e0b'
+                };
+                
+                const datasets = [];
+                
+                ['gmv', 'trx', 'aov'].forEach(metric => {
+                    Object.keys(chartMain.datasets[metric]).forEach(period => {
+                        datasets.push({
+                            label: `${metric.toUpperCase()} ${periodLabels[period]}`,
+                            data: chartMain.datasets[metric][period],
+                            backgroundColor: periodColors[period],
+                            borderColor: periodColors[period],
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            hidden: metric !== 'gmv' || period !== 'hoy',
+                            metric: metric,
+                            period: period
+                        });
+                    });
+                });
+                
+                return {
+                    labels: chartMain.labels,
+                    datasets: datasets
+                };
+            },
+            
             async loadDashboardData() {
                 this.loading = true;
                 try {
-                    if (this.currentDashboard === 'productmix') {
+                    if (this.currentDashboard === 'salesbyregister') {
+                        const params = {
+                            date: this.selectedDate,
+                            preset: this.datePreset,
+                            restaurant: this.isAdmin ? this.selectedRestaurant : this.unifiedTeamSk
+                        };
+                        
+                        console.log('[DEBUG] Loading SalesByRegister with params:', params);
+                        const response = await apiService.getDashboardData('salesbyregister', params);
+                        const data = response.data || response;
+                        
+                        this.charts = [{
+                            type: 'bar',
+                            title: 'Métricas por Caja',
+                            data: data.chart_main,
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                interaction: {
+                                    mode: 'index',
+                                    intersect: false
+                                },
+                                plugins: {
+                                    legend: {
+                                        position: 'top',
+                                        labels: {
+                                            usePointStyle: true,
+                                            padding: 15
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        grid: { display: false }
+                                    },
+                                    y: {
+                                        beginAtZero: true,
+                                        grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                                    }
+                                }
+                            }
+                        }];
+                        
+                        this.secondaryMetrics = data.category_donuts || [];
+                        this.tableData = data.table || [];
+                        
+                    } else if (this.currentDashboard === 'productmix') {
                         const params = {
                             start_date: this.tableStartDate,
                             end_date: this.tableEndDate,
@@ -532,7 +587,11 @@
                     }
                 } catch (error) {
                     console.error('Error cargando datos:', error);
-                    if (this.currentDashboard === 'productmix') {
+                    if (this.currentDashboard === 'salesbyregister') {
+                        this.charts = [];
+                        this.secondaryMetrics = [];
+                        this.tableData = [];
+                    } else if (this.currentDashboard === 'productmix') {
                         this.tableData = [];
                     } else if (this.currentDashboard === 'hours') {
                         this.hoursData = { chart: null, periods: [] };

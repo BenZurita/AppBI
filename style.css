@@ -2211,3 +2211,288 @@ h1, h2, h3, h4, h5, h6 {
         justify-content: center;
     }
 }
+/* ============================================================
+   VENTA POR CAJA - ESTILOS ESPECÍFICOS
+   ============================================================ */
+
+.sales-by-register-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.sbr-header {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    color: white;
+    padding: 1.25rem 1.5rem;
+    border-radius: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.sbr-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sbr-tabs {
+    display: flex;
+    gap: 0.5rem;
+    background: rgba(255,255,255,0.1);
+    padding: 0.25rem;
+    border-radius: 8px;
+}
+
+.metric-tab {
+    padding: 0.5rem 1rem;
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+}
+
+.metric-tab:hover {
+    color: white;
+    background: rgba(255,255,255,0.1);
+}
+
+.metric-tab.active {
+    background: white;
+    color: #1e293b;
+}
+
+.sbr-chart-section {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Donuts Grid */
+.sbr-donuts-section {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.donuts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+
+.donut-card {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.donut-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.donut-header {
+    font-weight: 700;
+    color: #1e293b;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+}
+
+.donut-wrapper {
+    position: relative;
+    height: 160px;
+    width: 160px;
+    margin: 0 auto;
+}
+
+.donut-center-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+}
+
+.donut-pct {
+    display: block;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #1e293b;
+    line-height: 1;
+}
+
+.donut-label {
+    font-size: 0.75rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.donut-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+.donut-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: #6b7280;
+    text-transform: uppercase;
+}
+
+.stat-value {
+    font-weight: 700;
+    color: #1e293b;
+    font-size: 0.9375rem;
+}
+
+/* Tabla de Venta por Caja */
+.sbr-table-section {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.sbr-table th {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.trend-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.trend-badge.up {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.trend-badge.down {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .sbr-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .sbr-tabs {
+        justify-content: center;
+    }
+    
+    .donuts-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .donut-wrapper {
+        height: 120px;
+        width: 120px;
+    }
+    
+    .donut-pct {
+        font-size: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .donuts-grid {
+        grid-template-columns: 1fr;
+    }
+}
+/* ── Category KPI Cards (Venta por Caja) ─────────────────── */
+.category-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.category-kpi-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.cat-kpi-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.cat-kpi-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.cat-kpi-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+}
+.cat-kpi-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 1rem;
+}
+.cat-kpi-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.cat-kpi-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.cat-kpi-value {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1e293b;
+    font-family: monospace;
+}
+.cat-kpi-trend {
+    font-size: 0.75rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+.cat-kpi-trend.up { color: #10b981; }
+.cat-kpi-trend.down { color: #ef4444; }

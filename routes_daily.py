@@ -849,3 +849,269 @@ def get_period_hours(periodo: str) -> str:
         'Late Night': '22:00 - 01:00'
     }
     return horarios.get(periodo, '')
+# ============================================================================
+# NUEVO ENDPOINT: VENTA POR CAJA (Sales by POS/Register)
+# ============================================================================
+
+@router.get("/dashboard/salesbyregister")
+async def dashboard_sales_by_register(
+    date: Optional[str] = Query(None),
+    preset: str = Query("today"),
+    restaurant: str = Query("all"),
+    restaurant_filter: RestaurantFilter = None
+):
+    """
+    Dashboard de Venta por Caja/POS.
+    
+    Muestra:
+    1. Chart de barras: GMV, TRX, AOV por caja (Hoy, Ayer, Semana, Mes)
+    2. Donuts: % participación por pos_config_category_name (GMV y TRX)
+    
+    Zona horaria Caracas UTC-4.
+    """
+    # Aplicar filtro de seguridad
+    effective_restaurant = restaurant
+    if restaurant_filter:
+        if not restaurant_filter["can_view_all"]:
+            effective_restaurant = restaurant_filter["restaurant_filter"]
+            print(f"[DEBUG] SalesByRegister restricted to: {effective_restaurant}")
+        else:
+            print(f"[DEBUG] Admin SalesByRegister, restaurant: {restaurant}")
+    
+    # Obtener fecha en zona Caracas
+    now_caracas = get_caracas_now()
+    
+    if date:
+        try:
+            parsed = datetime.strptime(date, "%Y-%m-%d")
+            hoy = parsed.replace(tzinfo=CARACAS_TZ)
+        except ValueError:
+            raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
+    else:
+        hoy = now_caracas
+    
+    hoy_id = date_to_date_id(hoy)
+    
+    # unified_team_sk para filtrar
+    unified_team_sk = None if effective_restaurant == "all" else effective_restaurant
+
+    # Cache
+    cache_key = hashlib.md5(f"salesbyregister:{hoy_id}:{effective_restaurant}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
+    try:
+        cache = get_cache()
+        hit = await cache.get(cache_key)
+        if hit:
+            return hit
+    except Exception:
+        cache = None
+
+    async with AsyncSessionLocal() as session:
+        # Calcular períodos de comparación
+        ayer = hoy - timedelta(days=1)
+        ayer_id = date_to_date_id(ayer)
+        sem_inicio, sem_fin = get_week_range(hoy_id)
+        mes_inicio, mes_fin = get_month_range(hoy_id)
+
+        # Query helper: métricas por caja para un período
+        async def get_caja_metrics(start_id: int, end_id: int, period_label: str):
+            params = {"start": start_id, "end": end_id}
+            filter_team = ""
+            if unified_team_sk:
+                filter_team = "AND sm.unified_team_sk = :team_sk"
+                params["team_sk"] = unified_team_sk
+            
+            sql = text(f"""
+                SELECT 
+                    COALESCE(NULLIF(s.caja, ''), s.session_name, 'Sin Nombre') as caja_name,
+                    s.pos_config_category_name,
+                    COALESCE(SUM(sm.gmv), 0) as gmv,
+                    COALESCE(SUM(sm.trx), 0) as trx,
+                    CASE WHEN SUM(sm.trx) > 0 THEN ROUND(SUM(sm.gmv)/SUM(sm.trx), 2) ELSE 0 END as aov
+                FROM daily_metrics_by_session sm
+                JOIN dim_pos_session s 
+                    ON s.session_sk_n = sm.session_sk_n 
+                    AND s.unified_team_sk = sm.unified_team_sk
+                WHERE sm.date_id BETWEEN :start AND :end {filter_team}
+                GROUP BY COALESCE(NULLIF(s.caja, ''), s.session_name, 'Sin Nombre'), 
+                         s.pos_config_category_name
+                HAVING SUM(sm.gmv) > 0 OR SUM(sm.trx) > 0
+                ORDER BY SUM(sm.gmv) DESC
+            """)
+            rows = (await session.execute(sql, params)).fetchall()
+            
+            return {
+                "period": period_label,
+                "cajas": [
+                    {
+                        "caja": r.caja_name,
+                        "category": r.pos_config_category_name or "Sin Categoría",
+                        "gmv": float(r.gmv or 0),
+                        "trx": int(r.trx or 0),
+                        "aov": float(r.aov or 0)
+                    }
+                    for r in rows
+                ],
+                "totals": {
+                    "gmv": sum(float(r.gmv or 0) for r in rows),
+                    "trx": sum(int(r.trx or 0) for r in rows),
+                    "aov": sum(float(r.aov or 0) for r in rows) / max(len(rows), 1)
+                }
+            }
+
+        # Obtener datos de todos los períodos
+        hoy_data = await get_caja_metrics(hoy_id, hoy_id, "Hoy")
+        ayer_data = await get_caja_metrics(ayer_id, ayer_id, "Ayer")
+        sem_data = await get_caja_metrics(sem_inicio, sem_fin, "Esta Semana")
+        mes_data = await get_caja_metrics(mes_inicio, mes_fin, "Este Mes")
+
+        # Preparar datos para el chart de barras agrupadas
+        # Estructura: labels = nombres de cajas, datasets = períodos con GMV/TRX/AOV
+        
+        # Obtener todas las cajas únicas del período actual (Hoy)
+        all_cajas = [c["caja"] for c in hoy_data["cajas"]] if hoy_data["cajas"] else ["Sin datos"]
+        
+        # Si no hay cajas hoy, usar las de ayer
+        if not all_cajas or all_cajas == ["Sin datos"]:
+            all_cajas = [c["caja"] for c in ayer_data["cajas"]] if ayer_data["cajas"] else ["Sin datos"]
+        
+        # Función para obtener valor de una caja en un período específico
+        def get_caja_value(caja_name, period_data, metric):
+            for c in period_data["cajas"]:
+                if c["caja"] == caja_name:
+                    return c[metric]
+            return 0
+
+        # Preparar datasets para el chart principal (barras agrupadas por período)
+        chart_data = {
+            "labels": all_cajas,
+            "datasets": {
+                "gmv": {
+                    "hoy": [get_caja_value(c, hoy_data, "gmv") for c in all_cajas],
+                    "ayer": [get_caja_value(c, ayer_data, "gmv") for c in all_cajas],
+                    "semana": [get_caja_value(c, sem_data, "gmv") for c in all_cajas],
+                    "mes": [get_caja_value(c, mes_data, "gmv") for c in all_cajas]
+                },
+                "trx": {
+                    "hoy": [get_caja_value(c, hoy_data, "trx") for c in all_cajas],
+                    "ayer": [get_caja_value(c, ayer_data, "trx") for c in all_cajas],
+                    "semana": [get_caja_value(c, sem_data, "trx") for c in all_cajas],
+                    "mes": [get_caja_value(c, mes_data, "trx") for c in all_cajas]
+                },
+                "aov": {
+                    "hoy": [get_caja_value(c, hoy_data, "aov") for c in all_cajas],
+                    "ayer": [get_caja_value(c, ayer_data, "aov") for c in all_cajas],
+                    "semana": [get_caja_value(c, sem_data, "aov") for c in all_cajas],
+                    "mes": [get_caja_value(c, mes_data, "aov") for c in all_cajas]
+                }
+            }
+        }
+
+        # Preparar datos para donuts por categoría (solo del período actual - Hoy)
+        # Agregar por categoría
+        category_totals = {}
+        for c in hoy_data["cajas"]:
+            cat = c["category"] or "Sin Categoría"
+            if cat not in category_totals:
+                category_totals[cat] = {"gmv": 0, "trx": 0}
+            category_totals[cat]["gmv"] += c["gmv"]
+            category_totals[cat]["trx"] += c["trx"]
+        
+        # Calcular porcentajes y comparación vs ayer por categoría
+        total_gmv = sum(v["gmv"] for v in category_totals.values())
+        total_trx = sum(v["trx"] for v in category_totals.values())
+
+        # Totales de ayer por categoría para comparación
+        ayer_category_totals = {}
+        for c in ayer_data["cajas"]:
+            cat = c["category"] or "Sin Categoría"
+            if cat not in ayer_category_totals:
+                ayer_category_totals[cat] = {"gmv": 0, "trx": 0}
+            ayer_category_totals[cat]["gmv"] += c["gmv"]
+            ayer_category_totals[cat]["trx"] += c["trx"]
+
+        category_donuts = []
+        colors = [
+            "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
+            "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"
+        ]
+
+        for idx, (cat, values) in enumerate(category_totals.items()):
+            pct_gmv = round((values["gmv"] / max(total_gmv, 1)) * 100, 1)
+            pct_trx = round((values["trx"] / max(total_trx, 1)) * 100, 1)
+            ayer_vals = ayer_category_totals.get(cat, {"gmv": 0, "trx": 0})
+            gmv_diff = values["gmv"] - ayer_vals["gmv"]
+            trx_diff = values["trx"] - ayer_vals["trx"]
+            gmv_diff_pct = round((gmv_diff / max(ayer_vals["gmv"], 1)) * 100, 1)
+            trx_diff_pct = round((trx_diff / max(ayer_vals["trx"], 1)) * 100, 1)
+            aov = round(values["gmv"] / max(values["trx"], 1), 2)
+
+            category_donuts.append({
+                "category": cat,
+                "gmv": round(values["gmv"], 2),
+                "trx": values["trx"],
+                "aov": aov,
+                "pct_gmv": pct_gmv,
+                "pct_trx": pct_trx,
+                "gmv_diff": round(gmv_diff, 2),
+                "trx_diff": trx_diff,
+                "gmv_diff_pct": gmv_diff_pct,
+                "trx_diff_pct": trx_diff_pct,
+                "gmv_trend": "up" if gmv_diff >= 0 else "down",
+                "trx_trend": "up" if trx_diff >= 0 else "down",
+                "color": colors[idx % len(colors)]
+            })
+
+        # Ordenar por GMV descendente
+        category_donuts.sort(key=lambda x: x["gmv"], reverse=True)
+
+        # Preparar datos para tabla detallada
+        table_data = []
+        for c in hoy_data["cajas"]:
+            # Buscar comparación con ayer
+            ayer_caja = next((a for a in ayer_data["cajas"] if a["caja"] == c["caja"]), None)
+            gmv_diff = c["gmv"] - (ayer_caja["gmv"] if ayer_caja else 0)
+            trx_diff = c["trx"] - (ayer_caja["trx"] if ayer_caja else 0)
+            
+            table_data.append({
+                "caja": c["caja"],
+                "category": c["category"],
+                "gmv": c["gmv"],
+                "trx": c["trx"],
+                "aov": c["aov"],
+                "gmv_diff": gmv_diff,
+                "trx_diff": trx_diff,
+                "gmv_trend": "up" if gmv_diff >= 0 else "down",
+                "trx_trend": "up" if trx_diff >= 0 else "down"
+            })
+
+        result = {
+            "success": True,
+            "meta": {
+                "reference_date": hoy.strftime("%Y-%m-%d"),
+                "caracas_time": now_caracas.strftime("%Y-%m-%d %H:%M %z"),
+                "preset": preset,
+                "restaurant_filter": effective_restaurant,
+                "timezone": "America/Caracas (UTC-4)",
+                "total_cajas": len(all_cajas),
+                "total_categories": len(category_donuts)
+            },
+            "data": {
+                "chart_main": chart_data,  # Datos para barras agrupadas
+                "category_donuts": category_donuts,  # Datos para donuts
+                "table": table_data,  # Datos para tabla detallada
+                "summary": {
+                    "hoy": hoy_data["totals"],
+                    "ayer": ayer_data["totals"],
+                    "semana": sem_data["totals"],
+                    "mes": mes_data["totals"]
+                }
+            }
+        }
+
+        if cache:
+            try:
+                await cache.set(cache_key, result, ttl=300)
+            except Exception:
+                pass
+
+        return result

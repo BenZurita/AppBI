@@ -10,7 +10,6 @@ createApp({
         const todayStr = today.toISOString().split('T')[0];
         const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
         
-        // Verificar autenticación al iniciar
         if (!apiService.isAuthenticated()) {
             window.location.href = '/login.html';
             return {};
@@ -21,7 +20,6 @@ createApp({
             sidebarOpen: true,
             loading: false,
             
-            // Datos de usuario - ESTAS VARIABLES FALTABAN EN EL VIEJO app.js
             userRole: apiService.getRole(),
             userRestaurantCode: apiService.getRestaurantCode(),
             username: apiService.getUsername(),
@@ -65,14 +63,13 @@ createApp({
         dashboardTitle() {
             const titles = {
                 'daily': 'Daily Sales',
-                'restaurants': 'Detalle de Restaurantes',
-                'inventario': 'Inventario',
-                'finanzas': 'Finanzas'
+                'salesbyregister': 'Venta por Caja',
+                'productmix': 'Product Mix',
+                'hours': 'Ventas por Hora'
             };
             return titles[this.currentDashboard] || 'Dashboard';
         },
         
-        // ESTE COMPUTED FALTABA - isAdmin
         isAdmin() {
             return apiService.isAdmin();
         },
@@ -107,13 +104,11 @@ createApp({
         }
     },
     mounted() {
-        // Verificar autenticación
         if (!apiService.isAuthenticated()) {
             window.location.href = '/login.html';
             return;
         }
         
-        // Si no es admin, forzar su restaurante
         if (!apiService.isAdmin()) {
             this.selectedRestaurant = apiService.getRestaurantCode();
             this.tableRestaurants = [apiService.getRestaurantCode()];
@@ -126,7 +121,6 @@ createApp({
             this.sidebarOpen = false;
         }
         
-        // Cerrar dropdown al hacer click fuera
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.custom-dropdown')) {
                 this.showRestaurantDropdown = false;
@@ -138,13 +132,11 @@ createApp({
             this.sidebarOpen = !this.sidebarOpen;
         },
         
-        // ESTE MÉTODO FALTABA - logout
         logout() {
             apiService.logout();
         },
         
         async changeDashboard(dashboardId) {
-            // Si no es admin, bloquear vista restaurants
             if (!this.isAdmin && dashboardId === 'restaurants') {
                 alert('Solo los administradores pueden ver el detalle de todos los restaurantes.');
                 return;
@@ -165,7 +157,6 @@ createApp({
                 if (response.success) {
                     this.restaurants = response.data || [];
                     
-                    // Guardar nombre del restaurante del usuario
                     if (!this.isAdmin && this.userRestaurantCode) {
                         const userRest = this.restaurants.find(r => 
                             String(r.id) === String(this.userRestaurantCode)
@@ -181,7 +172,6 @@ createApp({
         },
         
         async changeRestaurant() {
-            // Si no es admin, no permitir cambiar de restaurante
             if (!this.isAdmin && this.selectedRestaurant !== this.userRestaurantCode) {
                 this.selectedRestaurant = this.userRestaurantCode;
                 alert('Solo puedes ver tu restaurante asignado');
@@ -247,21 +237,117 @@ createApp({
             }
         },
         
+        prepareSalesByRegisterData(chartMain) {
+            if (!chartMain || !chartMain.labels) return { labels: [], datasets: [] };
+            
+            const periodLabels = { hoy: 'Hoy', ayer: 'Ayer', semana: 'Esta Semana', mes: 'Este Mes' };
+            const periodColors = {
+                hoy: '#10b981',
+                ayer: '#6b7280',
+                semana: '#3b82f6',
+                mes: '#f59e0b'
+            };
+            
+            const datasets = [];
+            
+            ['gmv', 'trx', 'aov'].forEach(metric => {
+                Object.keys(chartMain.datasets[metric]).forEach(period => {
+                    datasets.push({
+                        label: `${metric.toUpperCase()} ${periodLabels[period]}`,
+                        data: chartMain.datasets[metric][period],
+                        backgroundColor: periodColors[period],
+                        borderColor: periodColors[period],
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        hidden: metric !== 'gmv' || period !== 'hoy',
+                        metric: metric,
+                        period: period
+                    });
+                });
+            });
+            
+            return {
+                labels: chartMain.labels,
+                datasets: datasets
+            };
+        },
+        
         async loadDashboardData() {
             this.loading = true;
             try {
-                if (this.currentDashboard === 'restaurants') {
-                    const restaurants = this.isAdmin ? this.tableRestaurants : [this.userRestaurantCode];
+                if (this.currentDashboard === 'salesbyregister') {
+                    const params = {
+                        date: this.selectedDate,
+                        preset: this.datePreset,
+                        restaurant: this.isAdmin ? this.selectedRestaurant : apiService.getUnifiedTeamSk()
+                    };
                     
+                    console.log('[DEBUG] Loading SalesByRegister with params:', params);
+                    const response = await apiService.getDashboardData('salesbyregister', params);
+                    const data = response.data || response;
+                    
+                    const chartData = this.prepareSalesByRegisterData(data.chart_main);
+                    
+                    this.charts = [{
+                        type: 'bar',
+                        title: 'Métricas por Caja',
+                        data: chartData,
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: {
+                                mode: 'index',
+                                intersect: false
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                    labels: {
+                                        usePointStyle: true,
+                                        padding: 15
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    grid: { display: false }
+                                },
+                                y: {
+                                    beginAtZero: true,
+                                    grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                                }
+                            }
+                        }
+                    }];
+                    
+                    this.secondaryMetrics = data.category_donuts || [];
+                    this.tableData = data.table || [];
+                    
+                } else if (this.currentDashboard === 'productmix') {
                     const params = {
                         start_date: this.tableStartDate,
                         end_date: this.tableEndDate,
-                        restaurants: restaurants
+                        restaurant: this.isAdmin ? this.selectedRestaurant : apiService.getUnifiedTeamSk()
                     };
                     
-                    const response = await apiService.getDashboardData('restaurants', params);
+                    const response = await apiService.getDashboardData('productmix', params);
                     const data = response.data || response;
                     this.tableData = data.table || [];
+                    
+                } else if (this.currentDashboard === 'hours') {
+                    const params = {
+                        start_date: this.tableStartDate,
+                        end_date: this.tableEndDate,
+                        restaurant: this.isAdmin ? this.selectedRestaurant : apiService.getUnifiedTeamSk()
+                    };
+                    
+                    const response = await apiService.getDashboardData('hours', params);
+                    const data = response.data || response;
+                    
+                    this.hoursData = {
+                        chart: data.chart || null,
+                        periods: data.periods_table || []
+                    };
                     
                 } else {
                     const params = {
@@ -278,8 +364,14 @@ createApp({
                 }
             } catch (error) {
                 console.error('Error cargando datos:', error);
-                if (this.currentDashboard === 'restaurants') {
+                if (this.currentDashboard === 'salesbyregister') {
+                    this.charts = [];
+                    this.secondaryMetrics = [];
                     this.tableData = [];
+                } else if (this.currentDashboard === 'productmix') {
+                    this.tableData = [];
+                } else if (this.currentDashboard === 'hours') {
+                    this.hoursData = { chart: null, periods: [] };
                 } else {
                     this.kpis = [];
                     this.secondaryMetrics = [];

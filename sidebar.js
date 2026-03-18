@@ -8,7 +8,6 @@ const Sidebar = {
                     <i class="fas fa-chart-line"></i>
                     <span>App BI</span>
                 </div>
-                <!-- Botón cerrar visible en todos los dispositivos -->
                 <button class="close-btn" @click="closeSidebar" aria-label="Cerrar menú">
                     <i class="fas fa-times"></i>
                 </button>
@@ -31,7 +30,6 @@ const Sidebar = {
                 </ul>
             </nav>
             
-            <!-- SECCIÓN ADMIN: Gestión de Usuarios -->
             <div v-if="userRole === 'admin'" class="admin-section">
                 <div class="section-divider">
                     <span>Administración</span>
@@ -68,6 +66,7 @@ const Sidebar = {
         return {
             allDashboards: [
                 { id: 'daily', name: 'Daily Sales', icon: 'fas fa-calendar-day' },
+                { id: 'salesbyregister', name: 'Venta por Caja', icon: 'fas fa-cash-register' },
                 { id: 'productmix', name: 'Product Mix', icon: 'fas fa-chart-pie' },
                 { id: 'hours', name: 'Ventas por Hora', icon: 'fas fa-clock' }
             ]
