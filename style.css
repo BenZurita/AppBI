@@ -770,6 +770,179 @@ body {
     background: rgba(239, 68, 68, 0.1);
 }
 
+/* ============================================================
+   DELIVERY METRICS
+   ============================================================ */
+
+.delivery-metrics-section {
+    margin-top: 2rem;
+}
+
+.section-period-badge {
+    display: inline-block;
+    margin-left: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--border-color);
+    padding: 2px 8px;
+    border-radius: 12px;
+    vertical-align: middle;
+}
+
+.delivery-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.delivery-metric-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    border-top: 4px solid #3b82f6;
+    padding: 1.1rem 1.2rem;
+    box-shadow: var(--shadow);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.delivery-metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+}
+
+.delivery-metric-card--total {
+    border-top-color: #f97316;
+}
+
+/* Color accents on border-top */
+.delivery-metric-card .delivery-card-icon.blue  { color: #3b82f6; }
+.delivery-metric-card .delivery-card-icon.green { color: #10b981; }
+.delivery-metric-card .delivery-card-icon.red   { color: #ef4444; }
+.delivery-metric-card .delivery-card-icon.orange{ color: #f97316; }
+
+/* Apply border-top color per color class on the card */
+.delivery-metric-card:has(.delivery-card-icon.blue)   { border-top-color: #3b82f6; }
+.delivery-metric-card:has(.delivery-card-icon.green)  { border-top-color: #10b981; }
+.delivery-metric-card:has(.delivery-card-icon.red)    { border-top-color: #ef4444; }
+.delivery-metric-card:has(.delivery-card-icon.orange) { border-top-color: #f97316; }
+
+.delivery-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.delivery-card-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.delivery-card-icon.blue   { background: rgba(59,130,246,0.12); }
+.delivery-card-icon.green  { background: rgba(16,185,129,0.12); }
+.delivery-card-icon.red    { background: rgba(239,68,68,0.12);  }
+.delivery-card-icon.orange { background: rgba(249,115,22,0.12); }
+
+.delivery-card-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin: 0;
+}
+
+.delivery-card-gmv {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1;
+}
+
+.delivery-metric-card--total .delivery-card-gmv {
+    font-size: 1.65rem;
+    color: #f97316;
+}
+
+.delivery-card-row {
+    display: flex;
+    gap: 1rem;
+}
+
+.delivery-card-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.delivery-stat-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.delivery-stat-value {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.delivery-card-pct {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.delivery-pct-bar-bg {
+    height: 5px;
+    background: var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.delivery-pct-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.delivery-pct-bar-fill.blue   { background: #3b82f6; }
+.delivery-pct-bar-fill.green  { background: #10b981; }
+.delivery-pct-bar-fill.red    { background: #ef4444; }
+.delivery-pct-bar-fill.orange { background: #f97316; }
+
+.delivery-pct-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .delivery-metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .delivery-metrics-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Gráficos */
 .charts-section {
     display: grid;

@@ -177,6 +177,7 @@
                 <dashboard-grid 
                     :kpis="kpis" 
                     :secondary-metrics="secondaryMetrics"
+                    :delivery-metrics="deliveryMetrics"
                     :charts="charts"
                     :table-data="tableData"
                     :table-columns="tableColumns"
@@ -253,6 +254,7 @@
                 
                 kpis: [],
                 secondaryMetrics: [],
+                deliveryMetrics: [],
                 charts: [],
                 
                 tableData: [],
@@ -583,6 +585,7 @@
                         const data = response.data || response;
                         this.kpis = data.kpis || [];
                         this.secondaryMetrics = data.secondary_metrics || [];
+                        this.deliveryMetrics = data.delivery_metrics || [];
                         this.charts = data.charts || [];
                     }
                 } catch (error) {
@@ -598,6 +601,7 @@
                     } else {
                         this.kpis = [];
                         this.secondaryMetrics = [];
+                        this.deliveryMetrics = [];
                         this.charts = [];
                     }
                 } finally {

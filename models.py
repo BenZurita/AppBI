@@ -81,3 +81,23 @@ class GdeMetric(Base):
     unified_team_sk = Column(String(50), primary_key=True)
     pct_gde = Column(Numeric(10, 4), default=0)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+class PaymentMetrics(Base):
+    """Métricas diarias por tipo y método de pago (Delivery, Cashea, etc.)"""
+    __tablename__ = "daily_payment_metrics"
+
+    date_id = Column(Integer, primary_key=True)
+    unified_team_sk = Column(String(50), primary_key=True)
+    tipo_pago = Column(String, primary_key=True)
+    payment_method_name = Column(String, primary_key=True)
+
+    amount_usd = Column(Numeric(14, 2), default=0)
+    ordenes = Column(Numeric(14, 2), default=0)
+    amount_odoo16 = Column(Numeric(14, 2), default=0)
+    amount_odoo18 = Column(Numeric(14, 2), default=0)
+    ordenes_odoo16 = Column(Numeric(14, 2), default=0)
+    ordenes_odoo18 = Column(Numeric(14, 2), default=0)
+    calculation_version = Column(Integer, default=1)
+    source_rows = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

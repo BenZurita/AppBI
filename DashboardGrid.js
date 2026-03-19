@@ -2,7 +2,7 @@ const DashboardGrid = {
     components: {
         'kpi-card': KPICard
     },
-    props: ['kpis', 'secondaryMetrics', 'charts', 'loading', 'tableData', 'tableColumns', 'isTableMode', 'isHoursMode', 'hoursData', 'isSalesByRegisterMode'],
+    props: ['kpis', 'secondaryMetrics', 'deliveryMetrics', 'charts', 'loading', 'tableData', 'tableColumns', 'isTableMode', 'isHoursMode', 'hoursData', 'isSalesByRegisterMode'],
     data() {
         return {
             sortKey: '',
@@ -366,6 +366,56 @@ const DashboardGrid = {
                                         <span>{{ period.diff_pct }}%</span>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECCIÓN DELIVERY METRICS -->
+                <div class="delivery-metrics-section" v-if="deliveryMetrics && deliveryMetrics.length">
+                    <h3 class="section-title">
+                        <i class="fas fa-motorcycle"></i>
+                        Delivery
+                        <span class="section-period-badge">{{ deliveryMetrics[0] && deliveryMetrics[0].label_periodo }}</span>
+                    </h3>
+                    <div class="delivery-metrics-grid">
+                        <div
+                            v-for="(card, idx) in deliveryMetrics" :key="idx"
+                            class="delivery-metric-card"
+                            :class="{ 'delivery-metric-card--total': card.is_total }">
+
+                            <!-- Header -->
+                            <div class="delivery-card-header">
+                                <div class="delivery-card-icon" :class="card.color">
+                                    <i :class="card.icon"></i>
+                                </div>
+                                <h4 class="delivery-card-title">{{ card.title }}</h4>
+                            </div>
+
+                            <!-- Valores principales -->
+                            <div class="delivery-card-gmv">{{ card.gmv }}</div>
+
+                            <!-- TRX + AOV en fila -->
+                            <div class="delivery-card-row">
+                                <div class="delivery-card-stat">
+                                    <span class="delivery-stat-label">TRX</span>
+                                    <span class="delivery-stat-value">{{ card.trx }}</span>
+                                </div>
+                                <div class="delivery-card-stat">
+                                    <span class="delivery-stat-label">AOV</span>
+                                    <span class="delivery-stat-value">{{ card.aov }}</span>
+                                </div>
+                            </div>
+
+                            <!-- % vs GMV total -->
+                            <div class="delivery-card-pct">
+                                <div class="delivery-pct-bar-bg">
+                                    <div class="delivery-pct-bar-fill"
+                                         :class="card.color"
+                                         :style="{ width: Math.min(card.pct_gmv_total, 100) + '%' }">
+                                    </div>
+                                </div>
+                                <span class="delivery-pct-label">{{ card.pct_gmv_total }}% del GMV total</span>
                             </div>
                         </div>
                     </div>

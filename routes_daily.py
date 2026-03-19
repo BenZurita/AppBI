@@ -284,6 +284,60 @@ async def dashboard_daily(
                 "gde": float(row.gde_pct or 0)
             }
 
+        # Query helper: métricas de delivery por tipo_delivery para un día o rango
+        # IMPORTANTE: Ahora agrupa por tipo_delivery, filtra NULLs y resta IVA (16%)
+        async def get_delivery_metrics(start_id: int, end_id: int) -> dict:
+            """
+            Retorna para tipo_pago='Delivery':
+              - Una entrada por tipo_delivery (ARMI, PedidosYA, YUMMY, etc.)
+              - GMV = amount_usd / 1.16 (descuento IVA 16%)
+              - Excluye filas con tipo_delivery NULL
+            """
+            params_d = {"start": start_id, "end": end_id}
+            filter_team_d = ""
+            if unified_team_sk:
+                filter_team_d = "AND unified_team_sk = :team_sk"
+                params_d["team_sk"] = unified_team_sk
+
+            sql_d = text(f"""
+                SELECT
+                    pm.tipo_delivery,
+                    COALESCE(SUM(pm.amount_usd / 1.16), 0)  AS gmv,
+                    COALESCE(SUM(pm.ordenes), 0)             AS trx
+                FROM daily_payment_metrics pm
+                WHERE pm.tipo_pago = 'Delivery'
+                  AND pm.date_id BETWEEN :start AND :end
+                  AND pm.tipo_delivery IS NOT NULL
+                  {filter_team_d}
+                GROUP BY pm.tipo_delivery
+                ORDER BY SUM(pm.amount_usd / 1.16) DESC
+            """)
+            rows_d = (await session.execute(sql_d, params_d)).fetchall()
+
+            methods = []
+            total_gmv = 0.0
+            total_trx = 0.0
+            for r in rows_d:
+                gmv = float(r.gmv or 0)
+                trx = float(r.trx or 0)
+                total_gmv += gmv
+                total_trx += trx
+                methods.append({
+                    "name": r.tipo_delivery,
+                    "gmv": gmv,
+                    "trx": trx,
+                    "aov": round(gmv / trx, 2) if trx > 0 else 0.0,
+                })
+
+            return {
+                "methods": methods,
+                "total": {
+                    "gmv": round(total_gmv, 2),
+                    "trx": total_trx,
+                    "aov": round(total_gmv / total_trx, 2) if total_trx > 0 else 0.0,
+                }
+            }
+
         # Query helper: agregar por rango de fechas
         async def get_range_metrics(start_id: int, end_id: int):
             params = {"start": start_id, "end": end_id}
@@ -376,6 +430,10 @@ async def dashboard_daily(
         sem_pas_m = await get_range_metrics(sem_pas_inicio, sem_pas_fin)
         mes_m = await get_range_metrics(mes_inicio, mes_fin)
         mes_pas_m = await get_range_metrics(mes_pas_inicio, mes_pas_fin)
+
+        # Delivery: solo el período activo (la fecha seleccionada) y su GMV total
+        deliv_hoy_m  = await get_delivery_metrics(hoy_id,  hoy_id)
+        deliv_ayer_m = await get_delivery_metrics(ayer_id, ayer_id)
 
         # Helper para calcular diferencias
         def calc_diff(current, previous, tipo="gmv"):
@@ -517,7 +575,12 @@ async def dashboard_daily(
                         ]
                     },
                 ],
-                "charts": []
+                "charts": [],
+                "delivery_metrics": _build_delivery_metrics(
+                    deliv_hoy_m,  hoy_m["gmv"],
+                    deliv_ayer_m, ayer_m["gmv"],
+                    preset
+                ),
             },
         }
 
@@ -528,6 +591,83 @@ async def dashboard_daily(
                 pass
 
         return result
+
+
+# ============================================================
+# HELPER: Construir delivery_metrics para la respuesta del dashboard daily
+# ============================================================
+
+def _build_delivery_metrics(
+    active_d: dict,  gmv_active: float,
+    prev_d:   dict,  gmv_prev:   float,
+    preset:   str
+) -> list:
+    """
+    Devuelve una lista de cards de Delivery para el frontend.
+    Una card por tipo_delivery (ARMI, PedidosYA, YUMMY) + una card Total.
+
+    Cada card:
+    {
+      "id":       str,
+      "title":    str,
+      "icon":     str,
+      "color":    str,
+      "is_total": bool,
+      "gmv":      str,   # formateado "$1,234"
+      "trx":      str,
+      "aov":      str,
+      "pct_gmv_total": float,   # % de este método vs GMV total del período
+      "label_periodo":  str,    # "Hoy" | "Ayer" | fecha custom
+    }
+    """
+    METHOD_META = {
+        "ARMI":       {"icon": "fas fa-motorcycle",  "color": "blue"},
+        "PedidosYA":  {"icon": "fas fa-box",          "color": "green"},
+        "YUMMY":      {"icon": "fas fa-hamburger",    "color": "red"},
+    }
+    DEFAULT_META = {"icon": "fas fa-credit-card", "color": "blue"}
+
+    # Etiqueta legible según el preset activo
+    label = "Hoy" if preset in ("today", "custom") else "Ayer"
+
+    # Período fuente: si el usuario eligió "yesterday", mostramos ayer_d
+    src = prev_d if preset == "yesterday" else active_d
+    gmv_total = gmv_prev if preset == "yesterday" else gmv_active
+
+    def _fmt_card(method_name: str, gmv: float, trx: float, aov: float, is_total: bool) -> dict:
+        pct = round((gmv / gmv_total) * 100, 1) if gmv_total > 0 else 0.0
+        meta = METHOD_META.get(method_name, DEFAULT_META) if not is_total else {
+            "icon": "fas fa-motorcycle", "color": "orange"
+        }
+        return {
+            "id":            "delivery_total" if is_total else f"delivery_{method_name.lower().replace(' ', '_')}",
+            "title":         "Delivery Total" if is_total else method_name,
+            "icon":          meta["icon"],
+            "color":         meta["color"],
+            "is_total":      is_total,
+            "gmv":           f"${gmv:,.0f}",
+            "trx":           f"{int(trx):,}",
+            "aov":           f"${aov:,.2f}",
+            "pct_gmv_total": pct,
+            "label_periodo": label,
+        }
+
+    cards = []
+
+    # Sub-cards por método (orden fijo: ARMI, PYA/Pedidos Ya, YUMMY)
+    ORDER = ["ARMI", "PedidosYA", "YUMMY"]
+    methods_sorted = sorted(
+        src["methods"],
+        key=lambda m: ORDER.index(m["name"]) if m["name"] in ORDER else 99
+    )
+    for m in methods_sorted:
+        cards.append(_fmt_card(m["name"], m["gmv"], m["trx"], m["aov"], is_total=False))
+
+    # Card de total
+    t = src["total"]
+    cards.append(_fmt_card("__total__", t["gmv"], t["trx"], t["aov"], is_total=True))
+
+    return cards
 
 
 # ============================================================
