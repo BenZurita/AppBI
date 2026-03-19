@@ -920,22 +920,52 @@ async def dashboard_sales_by_register(
                 filter_team = "AND sm.unified_team_sk = :team_sk"
                 params["team_sk"] = unified_team_sk
             
+            # El JOIN a dim_pos_session se resuelve en un subquery ANTES del GROUP BY.
+            #
+            # Problema: pos_config_category_name puede ser NULL en una sesión de un día
+            # concreto aunque la misma caja tenga categoría en otros días (dim_pos_session
+            # tiene una fila por sesión por día). Unir solo por session_sk_n del día exacto
+            # produce la tarjeta "Sin Categoría" incorrectamente.
+            #
+            # Solución: si la categoría del día exacto es NULL, se busca el valor más
+            # reciente no-NULL para esa caja en toda la dimensión (mismo unified_team_sk
+            # + mismo nombre de caja). Solo cae en "Sin Categoría" si realmente no existe
+            # ningún valor histórico para esa caja.
             sql = text(f"""
-                SELECT 
-                    COALESCE(NULLIF(s.caja, ''), s.session_name, 'Sin Nombre') as caja_name,
-                    s.pos_config_category_name,
-                    COALESCE(SUM(sm.gmv), 0) as gmv,
-                    COALESCE(SUM(sm.trx), 0) as trx,
-                    CASE WHEN SUM(sm.trx) > 0 THEN ROUND(SUM(sm.gmv)/SUM(sm.trx), 2) ELSE 0 END as aov
-                FROM daily_metrics_by_session sm
-                JOIN dim_pos_session s 
-                    ON s.session_sk_n = sm.session_sk_n 
-                    AND s.unified_team_sk = sm.unified_team_sk
-                WHERE sm.date_id BETWEEN :start AND :end {filter_team}
-                GROUP BY COALESCE(NULLIF(s.caja, ''), s.session_name, 'Sin Nombre'), 
-                         s.pos_config_category_name
-                HAVING SUM(sm.gmv) > 0 OR SUM(sm.trx) > 0
-                ORDER BY SUM(sm.gmv) DESC
+                SELECT
+                    caja_name,
+                    pos_config_category_name,
+                    COALESCE(SUM(gmv), 0) as gmv,
+                    COALESCE(SUM(trx), 0) as trx,
+                    CASE WHEN SUM(trx) > 0 THEN ROUND(SUM(gmv)/SUM(trx), 2) ELSE 0 END as aov
+                FROM (
+                    SELECT
+                        sm.gmv,
+                        sm.trx,
+                        COALESCE(NULLIF(s.caja, ''), s.session_name, 'Sin Nombre') as caja_name,
+                        COALESCE(
+                            s.pos_config_category_name,
+                            (
+                                SELECT s2.pos_config_category_name
+                                FROM dim_pos_session s2
+                                WHERE s2.unified_team_sk = sm.unified_team_sk
+                                  AND COALESCE(NULLIF(s2.caja, ''), s2.session_name) =
+                                      COALESCE(NULLIF(s.caja,  ''), s.session_name)
+                                  AND s2.pos_config_category_name IS NOT NULL
+                                ORDER BY s2.date_id DESC
+                                LIMIT 1
+                            ),
+                            'Sin Categoría'
+                        ) as pos_config_category_name
+                    FROM daily_metrics_by_session sm
+                    LEFT JOIN dim_pos_session s
+                        ON s.session_sk_n    = sm.session_sk_n
+                        AND s.unified_team_sk = sm.unified_team_sk
+                    WHERE sm.date_id BETWEEN :start AND :end {filter_team}
+                ) base
+                GROUP BY caja_name, pos_config_category_name
+                HAVING SUM(gmv) > 0 OR SUM(trx) > 0
+                ORDER BY SUM(gmv) DESC
             """)
             rows = (await session.execute(sql, params)).fetchall()
             
@@ -1006,28 +1036,44 @@ async def dashboard_sales_by_register(
             }
         }
 
-        # Preparar datos para donuts por categoría (solo del período actual - Hoy)
-        # Agregar por categoría
+        # Seleccionar el período activo y su comparación según el preset recibido.
+        # "today"     → tarjetas muestran Hoy,    comparación vs Ayer
+        # "yesterday" → tarjetas muestran Ayer,   comparación vs Antes de ayer
+        # cualquier otro (custom) → idem "today" usando la fecha enviada
+        if preset == "yesterday":
+            active_data = ayer_data
+            # Antes de ayer: hoy - 2 días
+            antes_ayer = hoy - timedelta(days=2)
+            antes_ayer_id = date_to_date_id(antes_ayer)
+            prev_data = await get_caja_metrics(antes_ayer_id, antes_ayer_id, "Antes de Ayer")
+        else:
+            active_data = hoy_data
+            prev_data = ayer_data
+
+        # Agregar por categoría usando el período activo
         category_totals = {}
-        for c in hoy_data["cajas"]:
+        for c in active_data["cajas"]:
             cat = c["category"] or "Sin Categoría"
             if cat not in category_totals:
                 category_totals[cat] = {"gmv": 0, "trx": 0}
             category_totals[cat]["gmv"] += c["gmv"]
             category_totals[cat]["trx"] += c["trx"]
-        
-        # Calcular porcentajes y comparación vs ayer por categoría
-        total_gmv = sum(v["gmv"] for v in category_totals.values())
-        total_trx = sum(v["trx"] for v in category_totals.values())
 
-        # Totales de ayer por categoría para comparación
-        ayer_category_totals = {}
-        for c in ayer_data["cajas"]:
+        # Totales del período activo — fuente de verdad que cuadra con Daily Sales
+        total_gmv = active_data["totals"]["gmv"]
+        total_trx = active_data["totals"]["trx"]
+
+        # Totales del período anterior por categoría (para comparación en tarjetas)
+        prev_category_totals = {}
+        for c in prev_data["cajas"]:
             cat = c["category"] or "Sin Categoría"
-            if cat not in ayer_category_totals:
-                ayer_category_totals[cat] = {"gmv": 0, "trx": 0}
-            ayer_category_totals[cat]["gmv"] += c["gmv"]
-            ayer_category_totals[cat]["trx"] += c["trx"]
+            if cat not in prev_category_totals:
+                prev_category_totals[cat] = {"gmv": 0, "trx": 0}
+            prev_category_totals[cat]["gmv"] += c["gmv"]
+            prev_category_totals[cat]["trx"] += c["trx"]
+
+        prev_total_gmv = prev_data["totals"]["gmv"]
+        prev_total_trx = prev_data["totals"]["trx"]
 
         category_donuts = []
         colors = [
@@ -1036,13 +1082,14 @@ async def dashboard_sales_by_register(
         ]
 
         for idx, (cat, values) in enumerate(category_totals.items()):
+            # Porcentajes sobre el total real del período activo → siempre suman 100%
             pct_gmv = round((values["gmv"] / max(total_gmv, 1)) * 100, 1)
             pct_trx = round((values["trx"] / max(total_trx, 1)) * 100, 1)
-            ayer_vals = ayer_category_totals.get(cat, {"gmv": 0, "trx": 0})
-            gmv_diff = values["gmv"] - ayer_vals["gmv"]
-            trx_diff = values["trx"] - ayer_vals["trx"]
-            gmv_diff_pct = round((gmv_diff / max(ayer_vals["gmv"], 1)) * 100, 1)
-            trx_diff_pct = round((trx_diff / max(ayer_vals["trx"], 1)) * 100, 1)
+            prev_vals = prev_category_totals.get(cat, {"gmv": 0, "trx": 0})
+            gmv_diff = values["gmv"] - prev_vals["gmv"]
+            trx_diff = values["trx"] - prev_vals["trx"]
+            gmv_diff_pct = round((gmv_diff / max(prev_vals["gmv"], 1)) * 100, 1)
+            trx_diff_pct = round((trx_diff / max(prev_vals["trx"], 1)) * 100, 1)
             aov = round(values["gmv"] / max(values["trx"], 1), 2)
 
             category_donuts.append({
@@ -1058,20 +1105,41 @@ async def dashboard_sales_by_register(
                 "trx_diff_pct": trx_diff_pct,
                 "gmv_trend": "up" if gmv_diff >= 0 else "down",
                 "trx_trend": "up" if trx_diff >= 0 else "down",
-                "color": colors[idx % len(colors)]
+                "color": colors[idx % len(colors)],
+                "is_total": False
             })
 
         # Ordenar por GMV descendente
         category_donuts.sort(key=lambda x: x["gmv"], reverse=True)
 
-        # Preparar datos para tabla detallada
+        # Tarjeta TOTAL al final — la suma de todas las tarjetas debe coincidir
+        # exactamente con el GMV/TRX que muestra Daily Sales para el mismo período
+        total_gmv_diff = round(total_gmv - prev_total_gmv, 2)
+        total_trx_diff = total_trx - prev_total_trx
+        category_donuts.append({
+            "category": "TOTAL",
+            "gmv": round(total_gmv, 2),
+            "trx": total_trx,
+            "aov": round(total_gmv / max(total_trx, 1), 2),
+            "pct_gmv": 100.0,
+            "pct_trx": 100.0,
+            "gmv_diff": total_gmv_diff,
+            "trx_diff": total_trx_diff,
+            "gmv_diff_pct": round((total_gmv_diff / max(prev_total_gmv, 1)) * 100, 1),
+            "trx_diff_pct": round((total_trx_diff / max(prev_total_trx, 1)) * 100, 1),
+            "gmv_trend": "up" if total_gmv_diff >= 0 else "down",
+            "trx_trend": "up" if total_trx_diff >= 0 else "down",
+            "color": "#374151",
+            "is_total": True
+        })
+
+        # Preparar datos para tabla detallada — usa el mismo período activo que las tarjetas
         table_data = []
-        for c in hoy_data["cajas"]:
-            # Buscar comparación con ayer
-            ayer_caja = next((a for a in ayer_data["cajas"] if a["caja"] == c["caja"]), None)
-            gmv_diff = c["gmv"] - (ayer_caja["gmv"] if ayer_caja else 0)
-            trx_diff = c["trx"] - (ayer_caja["trx"] if ayer_caja else 0)
-            
+        for c in active_data["cajas"]:
+            prev_caja = next((p for p in prev_data["cajas"] if p["caja"] == c["caja"]), None)
+            gmv_diff = c["gmv"] - (prev_caja["gmv"] if prev_caja else 0)
+            trx_diff = c["trx"] - (prev_caja["trx"] if prev_caja else 0)
+
             table_data.append({
                 "caja": c["caja"],
                 "category": c["category"],

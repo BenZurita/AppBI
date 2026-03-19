@@ -220,15 +220,23 @@ const DashboardGrid = {
                 <div class="category-kpi-grid" v-if="secondaryMetrics && secondaryMetrics.length">
                     <div v-for="(cat, index) in secondaryMetrics" :key="index"
                          class="category-kpi-card"
-                         :style="{ borderTop: '4px solid ' + (cat.color || '#3b82f6') }">
+                         :class="{ 'category-kpi-card--total': cat.is_total }"
+                         :style="cat.is_total
+                             ? { borderTop: '4px solid #374151', background: '#f8fafc' }
+                             : { borderTop: '4px solid ' + (cat.color || '#3b82f6') }">
                         <div class="cat-kpi-header">
-                            <span class="cat-kpi-dot" :style="{ background: cat.color || '#3b82f6' }"></span>
-                            <h4 class="cat-kpi-title">{{ cat.category }}</h4>
+                            <span v-if="!cat.is_total" class="cat-kpi-dot" :style="{ background: cat.color || '#3b82f6' }"></span>
+                            <i v-else class="fas fa-sigma" style="font-size:0.85rem; color:#374151; margin-right:6px;"></i>
+                            <h4 class="cat-kpi-title" :style="cat.is_total ? 'font-weight:700; color:#111827;' : ''">
+                                {{ cat.is_total ? 'Total General' : cat.category }}
+                            </h4>
                         </div>
                         <div class="cat-kpi-metrics">
                             <div class="cat-kpi-metric">
                                 <span class="cat-kpi-label">GMV</span>
-                                <span class="cat-kpi-value">&#36;{{ formatNumber(cat.gmv) }}</span>
+                                <span class="cat-kpi-value" :style="cat.is_total ? 'font-weight:700;font-size:1.05rem;' : ''">
+                                    &#36;{{ formatNumber(cat.gmv) }}
+                                </span>
                                 <span class="cat-kpi-trend" :class="cat.gmv_trend">
                                     <i :class="cat.gmv_trend === 'up' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
                                     {{ Math.abs(cat.gmv_diff_pct) }}%
@@ -236,7 +244,9 @@ const DashboardGrid = {
                             </div>
                             <div class="cat-kpi-metric">
                                 <span class="cat-kpi-label">TRX</span>
-                                <span class="cat-kpi-value">{{ formatNumber(cat.trx) }}</span>
+                                <span class="cat-kpi-value" :style="cat.is_total ? 'font-weight:700;font-size:1.05rem;' : ''">
+                                    {{ formatNumber(cat.trx) }}
+                                </span>
                                 <span class="cat-kpi-trend" :class="cat.trx_trend">
                                     <i :class="cat.trx_trend === 'up' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
                                     {{ Math.abs(cat.trx_diff_pct) }}%
@@ -248,7 +258,9 @@ const DashboardGrid = {
                             </div>
                             <div class="cat-kpi-metric">
                                 <span class="cat-kpi-label">% GMV</span>
-                                <span class="cat-kpi-value" style="color: #6366f1;">{{ cat.pct_gmv }}%</span>
+                                <span class="cat-kpi-value" :style="cat.is_total ? 'color:#374151;font-weight:700;' : 'color:#6366f1;'">
+                                    {{ cat.pct_gmv }}%
+                                </span>
                             </div>
                         </div>
                     </div>
