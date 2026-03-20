@@ -1002,12 +1002,15 @@ async def dashboard_sales_by_register(
 ):
     """
     Dashboard de Venta por Caja/POS.
-    
-    Muestra:
-    1. Chart de barras: GMV, TRX, AOV por caja (Hoy, Ayer, Semana, Mes)
-    2. Donuts: % participación por pos_config_category_name (GMV y TRX)
-    
-    Zona horaria Caracas UTC-4.
+
+    La fecha que llega en `date` ES el día activo que se quiere mostrar.
+    El frontend es responsable de calcular la fecha correcta según el preset:
+      - today     → envía la fecha de hoy
+      - yesterday → envía la fecha de ayer
+      - custom    → envía la fecha seleccionada
+
+    El backend usa esa fecha como día activo y calcula los períodos de
+    comparación (día anterior, semana, mes) relativos a ella.
     """
     # Aplicar filtro de seguridad
     effective_restaurant = restaurant
@@ -1017,25 +1020,29 @@ async def dashboard_sales_by_register(
             print(f"[DEBUG] SalesByRegister restricted to: {effective_restaurant}")
         else:
             print(f"[DEBUG] Admin SalesByRegister, restaurant: {restaurant}")
-    
+
     # Obtener fecha en zona Caracas
     now_caracas = get_caracas_now()
-    
+
     if date:
         try:
             parsed = datetime.strptime(date, "%Y-%m-%d")
-            hoy = parsed.replace(tzinfo=CARACAS_TZ)
+            # La fecha recibida ES el día activo — no aplicar ningún offset por preset
+            dia_activo = parsed.replace(tzinfo=CARACAS_TZ)
         except ValueError:
             raise HTTPException(400, "Formato de fecha inválido. Use YYYY-MM-DD")
     else:
-        hoy = now_caracas
-    
-    hoy_id = date_to_date_id(hoy)
-    
+        # Sin fecha → usar hoy en Caracas
+        dia_activo = now_caracas
+
+    hoy_id = date_to_date_id(dia_activo)
+
+    print(f"[DEBUG] SalesByRegister - preset={preset}, dia_activo={dia_activo.strftime('%Y-%m-%d')}, hoy_id={hoy_id}")
+
     # unified_team_sk para filtrar
     unified_team_sk = None if effective_restaurant == "all" else effective_restaurant
 
-    # Cache
+    # Cache — key incluye la fecha activa real (ya calculada por el frontend)
     cache_key = hashlib.md5(f"salesbyregister:{hoy_id}:{effective_restaurant}:{restaurant_filter['user']['username'] if restaurant_filter else 'unknown'}".encode()).hexdigest()
     try:
         cache = get_cache()
@@ -1046,8 +1053,8 @@ async def dashboard_sales_by_register(
         cache = None
 
     async with AsyncSessionLocal() as session:
-        # Calcular períodos de comparación
-        ayer = hoy - timedelta(days=1)
+        # Calcular períodos de comparación relativos al día activo
+        ayer = dia_activo - timedelta(days=1)
         ayer_id = date_to_date_id(ayer)
         sem_inicio, sem_fin = get_week_range(hoy_id)
         mes_inicio, mes_fin = get_month_range(hoy_id)
@@ -1176,19 +1183,10 @@ async def dashboard_sales_by_register(
             }
         }
 
-        # Seleccionar el período activo y su comparación según el preset recibido.
-        # "today"     → tarjetas muestran Hoy,    comparación vs Ayer
-        # "yesterday" → tarjetas muestran Ayer,   comparación vs Antes de ayer
-        # cualquier otro (custom) → idem "today" usando la fecha enviada
-        if preset == "yesterday":
-            active_data = ayer_data
-            # Antes de ayer: hoy - 2 días
-            antes_ayer = hoy - timedelta(days=2)
-            antes_ayer_id = date_to_date_id(antes_ayer)
-            prev_data = await get_caja_metrics(antes_ayer_id, antes_ayer_id, "Antes de Ayer")
-        else:
-            active_data = hoy_data
-            prev_data = ayer_data
+        # El día activo siempre es el que llegó en `date` (calculado por el frontend).
+        # El período anterior siempre es el día inmediatamente anterior.
+        active_data = hoy_data
+        prev_data = ayer_data
 
         # Agregar por categoría usando el período activo
         category_totals = {}
@@ -1295,7 +1293,7 @@ async def dashboard_sales_by_register(
         result = {
             "success": True,
             "meta": {
-                "reference_date": hoy.strftime("%Y-%m-%d"),
+                "reference_date": dia_activo.strftime("%Y-%m-%d"),
                 "caracas_time": now_caracas.strftime("%Y-%m-%d %H:%M %z"),
                 "preset": preset,
                 "restaurant_filter": effective_restaurant,

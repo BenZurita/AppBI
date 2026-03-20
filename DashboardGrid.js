@@ -122,13 +122,13 @@ const DashboardGrid = {
                     </div>
                 </div>
 
-                <div class="hours-chart-section" v-if="hoursData.chart">
+                <div class="hours-chart-section" v-show="hoursData && hoursData.chart">
                     <div class="chart-container">
                         <div class="chart-header">
                             <i class="fas fa-chart-line"></i> Ventas por Hora del Día
                         </div>
-                        <div class="chart-wrapper-secure" style="height: 300px;">
-                            <canvas id="hoursChart" width="800" height="300"></canvas>
+                        <div class="chart-wrapper-secure" style="height: 300px; position: relative;">
+                            <canvas ref="hoursCanvas" style="display:block;width:100%;height:100%;"></canvas>
                         </div>
                     </div>
                 </div>
@@ -462,19 +462,59 @@ const DashboardGrid = {
     },
 
     mounted() {
-        this.$nextTick(() => setTimeout(() => this._renderAll(), 200));
+        // El canvas de horas existe siempre (v-show), podemos inicializarlo al montar
+        this.$nextTick(() => {
+            if (this.isHoursMode && this.hoursData && this.hoursData.chart) {
+                this._renderHoursChart();
+            } else if (!this.isTableMode && !this.isSalesByRegisterMode && !this.isHoursMode) {
+                setTimeout(() => this._renderDailyCharts(), 200);
+            }
+        });
     },
 
     beforeUnmount() {
+        if (this._renderTimer) { clearTimeout(this._renderTimer); this._renderTimer = null; }
+        this._destroyHoursChart();
         this._destroyAll();
     },
 
     watch: {
-        hoursData(newVal) {
-            if (newVal && newVal.chart) this._scheduleRender();
+        // Cuando llegan nuevos datos de horas, re-renderizar el chart
+        hoursData: {
+            deep: true,
+            handler(newVal) {
+                if (newVal && newVal.chart) {
+                    this.$nextTick(() => this._renderHoursChart());
+                }
+            }
         },
-        isHoursMode() { this._scheduleRender(); },
-        isTableMode(v) { if (v) this._destroyAll(); }
+        isHoursMode(entering) {
+            if (entering) {
+                this._destroyAll(); // destruir charts de daily si los había
+                if (this.hoursData && this.hoursData.chart) {
+                    this.$nextTick(() => this._renderHoursChart());
+                }
+            } else {
+                this._destroyHoursChart();
+            }
+        },
+        isTableMode(v) {
+            this._destroyAll();
+            if (!v && !this.isHoursMode && !this.isSalesByRegisterMode) {
+                this._scheduleRender();
+            }
+        },
+        isSalesByRegisterMode(v) {
+            this._destroyAll();
+            if (!v && !this.isHoursMode && !this.isTableMode) {
+                this._scheduleRender();
+            }
+        },
+        charts(newVal) {
+            if (!this.isTableMode && !this.isHoursMode && !this.isSalesByRegisterMode) {
+                if (newVal && newVal.length > 0) this._scheduleRender();
+            }
+        }
     },
 
     methods: {
@@ -526,7 +566,8 @@ const DashboardGrid = {
 
         _renderAll() {
             if (this.isHoursMode) {
-                if (this.hoursData && this.hoursData.chart) this._renderHoursChart();
+                // El chart de horas se maneja via watcher de hoursData y isHoursMode
+                // No hacer nada aquí para evitar condiciones de carrera
             } else if (!this.isTableMode && !this.isSalesByRegisterMode) {
                 this._renderDailyCharts();
             }
@@ -534,45 +575,97 @@ const DashboardGrid = {
 
         // ── Hours ─────────────────────────────────────────────────────────
 
+        _destroyHoursChart() {
+            if (this._charts['hoursChart']) {
+                try { this._charts['hoursChart'].destroy(); } catch(e) {}
+                this._charts['hoursChart'] = null;
+            }
+        },
+
         _renderHoursChart() {
-            if (!this.hoursData || !this.hoursData.chart) return;
-            const canvas = this._freshCanvas('hoursChart', '.hours-chart-section .chart-wrapper-secure');
-            if (!canvas) return;
+            const canvas = this.$refs.hoursCanvas;
+            // Si el canvas no está en el DOM aún (componente no montado), salir
+            if (!canvas || !canvas.isConnected) return;
+
+            // Destruir instancia anterior limpiamente
+            this._destroyHoursChart();
+
+            // También destruir cualquier instancia huérfana que Chart.js tenga del canvas
+            const orphan = Chart.getChart(canvas);
+            if (orphan) { try { orphan.destroy(); } catch(e) {} }
+
+            const data = this.hoursData && this.hoursData.chart;
+            if (!data) return;
 
             const ctx = canvas.getContext('2d');
-            const data = this.hoursData.chart;
-            const gradient = ctx.createLinearGradient(0,0,0,300);
-            gradient.addColorStop(0,'rgba(139,92,246,0.3)');
-            gradient.addColorStop(1,'rgba(139,92,246,0.05)');
+            const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+            gradient.addColorStop(0, 'rgba(139,92,246,0.3)');
+            gradient.addColorStop(1, 'rgba(139,92,246,0.05)');
 
             this._charts['hoursChart'] = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: data.hours,
                     datasets: [
-                        { label:'Ventas USD', data:data.sales, borderColor:'#8b5cf6', backgroundColor:gradient,
-                          borderWidth:3, fill:true, tension:0.4,
-                          pointBackgroundColor:'#8b5cf6', pointBorderColor:'#fff', pointBorderWidth:2, pointRadius:4, pointHoverRadius:6 },
-                        { label:'Órdenes', data:data.orders, borderColor:'#f59e0b', backgroundColor:'transparent',
-                          borderWidth:2, borderDash:[5,5], fill:false, tension:0.4,
-                          pointBackgroundColor:'#f59e0b', pointBorderColor:'#fff', pointBorderWidth:2, pointRadius:3, yAxisID:'y1' }
+                        {
+                            label: 'Ventas USD',
+                            data: data.sales,
+                            borderColor: '#8b5cf6',
+                            backgroundColor: gradient,
+                            borderWidth: 3, fill: true, tension: 0.4,
+                            pointBackgroundColor: '#8b5cf6', pointBorderColor: '#fff',
+                            pointBorderWidth: 2, pointRadius: 4, pointHoverRadius: 6
+                        },
+                        {
+                            label: 'Órdenes',
+                            data: data.orders,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2, borderDash: [5, 5], fill: false, tension: 0.4,
+                            pointBackgroundColor: '#f59e0b', pointBorderColor: '#fff',
+                            pointBorderWidth: 2, pointRadius: 3, yAxisID: 'y1'
+                        }
                     ]
                 },
                 options: {
-                    responsive:true, maintainAspectRatio:false,
-                    interaction:{ mode:'index', intersect:false },
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false, // desactivar animación evita renders sobre DOM muerto
+                    interaction: { mode: 'index', intersect: false },
                     plugins: {
-                        legend:{ position:'top', labels:{usePointStyle:true, padding:15} },
-                        tooltip:{ backgroundColor:'rgba(30,41,59,0.95)', padding:12, cornerRadius:8,
-                            callbacks:{ label: ctx => {
-                                let l = (ctx.dataset.label||'')+': ';
-                                return l + (ctx.dataset.label==='Ventas USD' ? '$'+ctx.parsed.y.toLocaleString() : ctx.parsed.y.toLocaleString());
-                            }}}
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                        tooltip: {
+                            backgroundColor: 'rgba(30,41,59,0.95)', padding: 12, cornerRadius: 8,
+                            callbacks: {
+                                label: ctx => {
+                                    const l = (ctx.dataset.label || '') + ': ';
+                                    return l + (ctx.dataset.label === 'Ventas USD'
+                                        ? '$' + ctx.parsed.y.toLocaleString()
+                                        : ctx.parsed.y.toLocaleString());
+                                }
+                            }
+                        }
                     },
                     scales: {
-                        x:{ grid:{display:false}, ticks:{ maxRotation:45, callback: function(v){ const h=parseInt(this.getLabelForValue(v)); return h%3===0?this.getLabelForValue(v):''; }}},
-                        y:{ beginAtZero:true, grid:{color:'rgba(0,0,0,0.05)'}, ticks:{callback: v=>'$'+(v/1000).toFixed(0)+'k'} },
-                        y1:{ type:'linear', display:false, position:'right', beginAtZero:true, grid:{drawOnChartArea:false} }
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                maxRotation: 45,
+                                callback: function(v) {
+                                    const h = parseInt(this.getLabelForValue(v));
+                                    return h % 3 === 0 ? this.getLabelForValue(v) : '';
+                                }
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k' }
+                        },
+                        y1: {
+                            type: 'linear', display: false, position: 'right',
+                            beginAtZero: true, grid: { drawOnChartArea: false }
+                        }
                     }
                 }
             });

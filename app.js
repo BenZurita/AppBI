@@ -141,6 +141,8 @@ createApp({
                 alert('Solo los administradores pueden ver el detalle de todos los restaurantes.');
                 return;
             }
+            // Evitar cambio doble si ya estamos en ese dashboard o cargando
+            if (this.currentDashboard === dashboardId || this.loading) return;
             this.currentDashboard = dashboardId;
             await this.loadDashboardData();
         },
@@ -272,12 +274,24 @@ createApp({
             };
         },
         
+        // Devuelve la fecha de referencia que debe recibir el backend.
+        // Para presets 'today' y 'yesterday' siempre se envía la fecha de HOY,
+        // ya que el backend calcula el período correcto a partir del preset.
+        // Si se envía la fecha de ayer junto con preset='yesterday', el backend
+        // la toma como referencia y resta un día más, mostrando anteayer (bug).
+        _getReferenceDateForBackend() {
+            if (this.datePreset === 'today' || this.datePreset === 'yesterday') {
+                return new Date().toISOString().split('T')[0];
+            }
+            return this.selectedDate;
+        },
+        
         async loadDashboardData() {
             this.loading = true;
             try {
                 if (this.currentDashboard === 'salesbyregister') {
                     const params = {
-                        date: this.selectedDate,
+                        date: this._getReferenceDateForBackend(),
                         preset: this.datePreset,
                         restaurant: this.isAdmin ? this.selectedRestaurant : apiService.getUnifiedTeamSk()
                     };
@@ -351,7 +365,7 @@ createApp({
                     
                 } else {
                     const params = {
-                        date: this.selectedDate,
+                        date: this._getReferenceDateForBackend(),
                         preset: this.datePreset,
                         restaurant: this.selectedRestaurant
                     };

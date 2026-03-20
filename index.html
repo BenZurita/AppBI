@@ -68,7 +68,7 @@
                             <label for="restaurant-select">
                                 <i class="fas fa-store"></i>
                             </label>
-                            <select id="restaurant-select" v-model="selectedRestaurant" @change="changeRestaurant" class="restaurant-select">
+                            <select id="restaurant-select" v-model="selectedRestaurant" class="restaurant-select">
                                 <option value="all">Todos los restaurantes</option>
                                 <option v-for="rest in restaurants" :key="rest.id" :value="rest.id">
                                     {{ rest.name }}
@@ -135,7 +135,7 @@
                             <!-- Filtro de restaurante: visible para admin -->
                             <div v-if="isAdmin" class="filter-group restaurant-dropdown">
                                 <label>Restaurante</label>
-                                <select v-model="selectedRestaurant" @change="changeRestaurant" class="restaurant-select">
+                                <select v-model="selectedRestaurant" class="restaurant-select">
                                     <option value="all">Todos los restaurantes</option>
                                     <option v-for="rest in restaurants" :key="rest.id" :value="rest.id">
                                         {{ rest.name }}
@@ -279,6 +279,8 @@
                 tableStartDate: startOfYear,
                 tableEndDate: todayStr,
                 
+                _loadId: 0,   // mutex: cada carga tiene un id único; si llega uno nuevo, el viejo se descarta
+                
                 currentDate: today.toLocaleDateString('es-ES', { 
                     weekday: 'long', 
                     year: 'numeric', 
@@ -310,6 +312,22 @@
                 if (this.datePreset === 'today') return 'Hoy';
                 if (this.datePreset === 'yesterday') return 'Ayer';
                 return this.formatDisplayDate(this.selectedDate);
+            }
+        },
+        watch: {
+            // Reaccionar al cambio de restaurante con debounce de 300ms.
+            // Esto reemplaza el @change en el <select> para evitar que Vue intente
+            // parchear el DOM mientras un update reactivo ya está en vuelo.
+            selectedRestaurant(newVal, oldVal) {
+                if (newVal === oldVal) return;
+                if (!this.isAdmin && newVal !== this.unifiedTeamSk) {
+                    this.$nextTick(() => { this.selectedRestaurant = this.unifiedTeamSk; });
+                    return;
+                }
+                if (this._restaurantTimer) clearTimeout(this._restaurantTimer);
+                this._restaurantTimer = setTimeout(() => {
+                    this.loadDashboardData();
+                }, 300);
             }
         },
         mounted() {
@@ -425,12 +443,7 @@
             },
             
             async changeRestaurant() {
-                if (!this.isAdmin && this.selectedRestaurant !== this.unifiedTeamSk) {
-                    this.selectedRestaurant = this.unifiedTeamSk;
-                    alert('Solo puedes ver tu restaurante asignado');
-                    return;
-                }
-                await this.loadDashboardData();
+                // Mantenido por compatibilidad, ahora lo maneja el watch de selectedRestaurant
             },
             
             async setDatePreset(preset) {
@@ -497,6 +510,9 @@
             },
             
             async loadDashboardData() {
+                // Incrementar el id de carga — cualquier respuesta de una carga anterior
+                // tendrá un id distinto y será descartada sin tocar el estado reactivo.
+                const myLoadId = ++this._loadId;
                 this.loading = true;
                 try {
                     if (this.currentDashboard === 'salesbyregister') {
@@ -505,83 +521,57 @@
                             preset: this.datePreset,
                             restaurant: this.isAdmin ? this.selectedRestaurant : this.unifiedTeamSk
                         };
-                        
                         console.log('[DEBUG] Loading SalesByRegister with params:', params);
                         const response = await apiService.getDashboardData('salesbyregister', params);
+                        if (myLoadId !== this._loadId) return; // descartado por carga más nueva
                         const data = response.data || response;
-                        
                         this.charts = [{
-                            type: 'bar',
-                            title: 'Métricas por Caja',
-                            data: data.chart_main,
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                interaction: {
-                                    mode: 'index',
-                                    intersect: false
-                                },
-                                plugins: {
-                                    legend: {
-                                        position: 'top',
-                                        labels: {
-                                            usePointStyle: true,
-                                            padding: 15
-                                        }
-                                    }
-                                },
-                                scales: {
-                                    x: {
-                                        grid: { display: false }
-                                    },
-                                    y: {
-                                        beginAtZero: true,
-                                        grid: { color: 'rgba(0, 0, 0, 0.05)' }
-                                    }
-                                }
+                            type: 'bar', title: 'Métricas por Caja', data: data.chart_main,
+                            options: { responsive: true, maintainAspectRatio: false,
+                                interaction: { mode: 'index', intersect: false },
+                                plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } } },
+                                scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } } }
                             }
                         }];
-                        
                         this.secondaryMetrics = data.category_donuts || [];
                         this.tableData = data.table || [];
-                        
+
                     } else if (this.currentDashboard === 'productmix') {
                         const params = {
                             start_date: this.tableStartDate,
                             end_date: this.tableEndDate,
                             restaurant: this.isAdmin ? this.selectedRestaurant : this.unifiedTeamSk
                         };
-                        
                         console.log('[DEBUG] Loading Product Mix with params:', params);
                         const response = await apiService.getDashboardData('productmix', params);
+                        if (myLoadId !== this._loadId) return; // descartado
                         const data = response.data || response;
                         this.tableData = data.table || [];
-                        
+
                     } else if (this.currentDashboard === 'hours') {
                         const params = {
                             start_date: this.tableStartDate,
                             end_date: this.tableEndDate,
                             restaurant: this.isAdmin ? this.selectedRestaurant : this.unifiedTeamSk
                         };
-                        
                         console.log('[DEBUG] Loading Hours with params:', params);
                         const response = await apiService.getDashboardData('hours', params);
+                        if (myLoadId !== this._loadId) return; // descartado
                         const data = response.data || response;
-                        
                         this.hoursData = {
                             chart: data.chart || null,
                             periods: data.periods_table || []
                         };
-                        
+
                     } else {
                         const params = {
                             date: this.selectedDate,
                             preset: this.datePreset,
                             restaurant: this.selectedRestaurant
                         };
-                        
                         console.log('[DEBUG] Loading daily dashboard with params:', params);
                         const response = await apiService.getDashboardData(this.currentDashboard, params);
+                        if (myLoadId !== this._loadId) return; // descartado
                         const data = response.data || response;
                         this.kpis = data.kpis || [];
                         this.secondaryMetrics = data.secondary_metrics || [];
@@ -589,6 +579,7 @@
                         this.charts = data.charts || [];
                     }
                 } catch (error) {
+                    if (myLoadId !== this._loadId) return; // error de carga antigua, ignorar
                     console.error('Error cargando datos:', error);
                     if (this.currentDashboard === 'salesbyregister') {
                         this.charts = [];
@@ -605,7 +596,10 @@
                         this.charts = [];
                     }
                 } finally {
-                    this.loading = false;
+                    // Solo apagar el spinner si somos la carga activa
+                    if (myLoadId === this._loadId) {
+                        this.loading = false;
+                    }
                 }
             },
             
