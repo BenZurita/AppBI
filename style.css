@@ -1067,7 +1067,7 @@ body {
 
 .data-table td {
     padding: 0.5rem 1rem;
-    border-bottom: 1px solid #f1f5f9;
+    border-bottom: 1px solid #000000;
     color: var(--text-primary);
     height: 40px;
 }
@@ -1082,7 +1082,7 @@ body {
 }
 
 .data-table .total-row {
-    background: linear-gradient(to right, #eff6ff, #ffffff) !important;
+    background: linear-gradient(to right, #000408, #080000) !important;
     border-top: 2px solid #3b82f6;
     font-weight: 700;
 }
