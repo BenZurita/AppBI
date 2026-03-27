@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -10,6 +11,8 @@ from sqlalchemy import text
 from cache import get_cache
 from Database import AsyncSessionLocal
 from auth import RestaurantFilter, get_current_user, CurrentUser
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
@@ -90,7 +93,7 @@ async def restaurants_list(current_user: CurrentUser):
         else:
             # Para usuarios de restaurante: mostrar SOLO su restaurante
             user_team_sk = current_user.get("unified_team_sk")
-            print(f"[DEBUG] restaurants_list for user: {current_user.get('username')}, team_sk: {user_team_sk}")
+            logger.debug("restaurants_list for user: %s, team_sk: %s", current_user.get('username'), user_team_sk)
             
             if not user_team_sk:
                 return {"success": True, "data": []}  # No tiene restaurante asignado
@@ -137,9 +140,9 @@ async def dashboard_daily(
     if restaurant_filter:
         if not restaurant_filter["can_view_all"]:
             effective_restaurant = restaurant_filter["restaurant_filter"]
-            print(f"[DEBUG] Dashboard restricted to: {effective_restaurant}")
+            logger.debug("Dashboard restricted to: %s", effective_restaurant)
         else:
-            print(f"[DEBUG] Admin view, restaurant param: {restaurant}")
+            logger.debug("Admin view, restaurant param: %s", restaurant)
     
     # Obtener fecha en zona Caracas
     now_caracas = get_caracas_now()
@@ -156,9 +159,9 @@ async def dashboard_daily(
     
     hoy_id = date_to_date_id(hoy)
     
-    print(f"[DEBUG] Caracas now: {now_caracas.strftime('%Y-%m-%d %H:%M %z')}")
-    print(f"[DEBUG] Effective date: {hoy.strftime('%Y-%m-%d')}")
-    print(f"[DEBUG] Date ID: {hoy_id}")
+    logger.debug("Caracas now: %s", now_caracas.strftime('%Y-%m-%d %H:%M %z'))
+    logger.debug("Effective date: %s", hoy.strftime('%Y-%m-%d'))
+    logger.debug("Date ID: %s", hoy_id)
     
     # unified_team_sk para filtrar (None si es "all")
     unified_team_sk = None if effective_restaurant == "all" else effective_restaurant
@@ -689,9 +692,9 @@ async def dashboard_product_mix(
     if restaurant_filter:
         if not restaurant_filter["can_view_all"]:
             effective_restaurant = restaurant_filter["restaurant_filter"]
-            print(f"[DEBUG] Product Mix restricted to: {effective_restaurant}")
+            logger.debug("Product Mix restricted to: %s", effective_restaurant)
         else:
-            print(f"[DEBUG] Admin Product Mix, restaurant: {restaurant}")
+            logger.debug("Admin Product Mix, restaurant: %s", restaurant)
     
     try:
         # Convertir fechas usando zona Caracas
@@ -809,9 +812,9 @@ async def dashboard_hours(
     if restaurant_filter:
         if not restaurant_filter["can_view_all"]:
             effective_restaurant = restaurant_filter["restaurant_filter"]
-            print(f"[DEBUG] Hours restricted to: {effective_restaurant}")
+            logger.debug("Hours restricted to: %s", effective_restaurant)
         else:
-            print(f"[DEBUG] Admin Hours, restaurant: {restaurant}")
+            logger.debug("Admin Hours, restaurant: %s", restaurant)
     
     try:
         # Convertir fechas usando zona Caracas
@@ -1017,9 +1020,9 @@ async def dashboard_sales_by_register(
     if restaurant_filter:
         if not restaurant_filter["can_view_all"]:
             effective_restaurant = restaurant_filter["restaurant_filter"]
-            print(f"[DEBUG] SalesByRegister restricted to: {effective_restaurant}")
+            logger.debug("SalesByRegister restricted to: %s", effective_restaurant)
         else:
-            print(f"[DEBUG] Admin SalesByRegister, restaurant: {restaurant}")
+            logger.debug("Admin SalesByRegister, restaurant: %s", restaurant)
 
     # Obtener fecha en zona Caracas
     now_caracas = get_caracas_now()
@@ -1037,7 +1040,7 @@ async def dashboard_sales_by_register(
 
     hoy_id = date_to_date_id(dia_activo)
 
-    print(f"[DEBUG] SalesByRegister - preset={preset}, dia_activo={dia_activo.strftime('%Y-%m-%d')}, hoy_id={hoy_id}")
+    logger.debug("SalesByRegister - preset=%s, dia_activo=%s, hoy_id=%s", preset, dia_activo.strftime('%Y-%m-%d'), hoy_id)
 
     # unified_team_sk para filtrar
     unified_team_sk = None if effective_restaurant == "all" else effective_restaurant

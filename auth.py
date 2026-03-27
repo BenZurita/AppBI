@@ -1,3 +1,4 @@
+import logging
 import os
 import hashlib
 import bcrypt
@@ -12,6 +13,8 @@ from sqlalchemy import text
 from Database import AsyncSessionLocal
 
 # ─── Configuración ────────────────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "cambia-esto-en-produccion-usa-openssl-rand")
 ALGORITHM = "HS256"
@@ -36,7 +39,7 @@ def _verify_password(plain: str, hashed: str) -> bool:
                 plain_bytes = plain_bytes[:72]
             return bcrypt.checkpw(plain_bytes, hashed.encode('utf-8'))
         except Exception as e:
-            print(f"[DEBUG] Error bcrypt: {e}")
+            logger.debug("Error bcrypt: %s", e)
             return False
     
     return False
@@ -102,7 +105,7 @@ async def get_user_restaurant_filter(
     role = current_user.get("role", "restaurant")
     user_team_sk = current_user.get("unified_team_sk")
     
-    print(f"[DEBUG] Filter check: user={current_user.get('username')}, role={role}, team_sk={user_team_sk}, requested={requested_restaurant}")
+    logger.debug("Filter check: user=%s, role=%s, team_sk=%s, requested=%s", current_user.get('username'), role, user_team_sk, requested_restaurant)
     
     if role == "admin":
         return {
@@ -113,7 +116,7 @@ async def get_user_restaurant_filter(
     
     if role == "restaurant":
         if not user_team_sk:
-            print(f"[ERROR] Usuario {current_user.get('username')} es restaurante pero no tiene unified_team_sk")
+            logger.error("Usuario %s es restaurante pero no tiene unified_team_sk", current_user.get('username'))
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Usuario de restaurante sin establecimiento asignado. Contacte al administrador."
@@ -170,11 +173,11 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/token", response_model=Token)
 async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
     """Login endpoint."""
-    print(f"[DEBUG] Login attempt: username={form_data.username}")
+    logger.info("Login attempt: username=%s", form_data.username)
     
     user = await _get_user_from_db(form_data.username)
     if not user:
-        print(f"[DEBUG] User not found: {form_data.username}")
+        logger.debug("User not found: %s", form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contraseña incorrectos",
@@ -182,7 +185,7 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
         )
     
     password_valid = _verify_password(form_data.password, user["password"])
-    print(f"[DEBUG] Password valid: {password_valid}")
+    logger.debug("Password valid: %s", password_valid)
     
     if not password_valid:
         raise HTTPException(
@@ -194,7 +197,7 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
     role = user.get("role", "restaurant")
     
     if role == "restaurant" and not user.get("unified_team_sk"):
-        print(f"[WARNING] Usuario {user['username']} es restaurante pero no tiene unified_team_sk asignado")
+        logger.warning("Usuario %s es restaurante pero no tiene unified_team_sk asignado", user['username'])
     
     token_data = {
         "sub": user["username"],
@@ -204,7 +207,7 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
     
     token = _create_access_token(token_data)
     
-    print(f"[DEBUG] Login successful: {user['username']}, role={role}, team_sk={user.get('unified_team_sk')}")
+    logger.info("Login successful: %s, role=%s, team_sk=%s", user['username'], role, user.get('unified_team_sk'))
     
     return Token(
         access_token=token,
@@ -363,7 +366,7 @@ async def reset_password(
         except Exception:
             pass
         
-        print(f"[ADMIN] Password changed for {request.target_username} by {current_user['username']}")
+        logger.info("[ADMIN] Password changed for %s by %s", request.target_username, current_user['username'])
         
         return PasswordChangeResponse(
             success=True,

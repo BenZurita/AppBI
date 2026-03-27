@@ -1,35 +1,25 @@
 // =========================================================================
-// DETECCIÓN AUTOMÁTICA DE ENTORNO
+// DETECCIÓN DE ENTORNO - VERSIÓN PRODUCCIÓN
 // =========================================================================
 
 const hostname = window.location.hostname;
 const port = window.location.port;
 
-// Detectar tipo de entorno
-const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-const isIPLocal = hostname.startsWith('192.168.') || 
-                  hostname.startsWith('10.') || 
-                  hostname.startsWith('172.16.');
-const isNgrok = hostname.includes('ngrok') || hostname.includes('ngrok-free');
-const isGitHubCodespace = hostname.includes('github.dev');
+// Configuración: IP pública de tu servidor (cámbiala cuando tengas dominio)
+const PRODUCTION_IP = '161.97.175.225';
+const PRODUCTION_PORT = '8001';
 
-// URL base según el entorno
 let API_BASE_URL;
 
-if (isLocalhost) {
-    // Misma PC: localhost
-    API_BASE_URL = 'http://localhost:5000/api';
-} else if (isIPLocal || isNgrok || isGitHubCodespace) {
-    // Misma red (192.168.x.x) o túneles: usar el mismo hostname que el frontend
-    API_BASE_URL = `${window.location.protocol}//${hostname}:${port || 5000}/api`;
-} else {
-    // Producción: mismo origen
+if (hostname === PRODUCTION_IP || hostname === 'localhost' || hostname === '127.0.0.1') {
+    // Usar el origen actual (funciona para IP pública y localhost)
     API_BASE_URL = `${window.location.origin}/api`;
+} else {
+    // Fallback para otros casos (ngrok, codespaces, etc.)
+    API_BASE_URL = `${window.location.protocol}//${hostname}:${port || 8000}/api`;
 }
 
 console.log('[DEBUG] Hostname:', hostname);
-console.log('[DEBUG] isLocalhost:', isLocalhost);
-console.log('[DEBUG] isIPLocal:', isIPLocal);
 console.log('[DEBUG] API_BASE_URL:', API_BASE_URL);
 
 const apiService = {

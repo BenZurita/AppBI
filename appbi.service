@@ -1,0 +1,27 @@
+[Unit]
+Description=App BI - Dashboard FastAPI
+After=network.target redis.service
+Wants=redis.service
+
+[Service]
+Type=exec
+User=appbi
+Group=appbi
+WorkingDirectory=/opt/appbi
+EnvironmentFile=/opt/appbi/.env
+ExecStart=/opt/appbi/venv/bin/gunicorn main:app \
+    --workers 4 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8000 \
+    --log-level info \
+    --access-logfile - \
+    --error-logfile - \
+    --timeout 120 \
+    --graceful-timeout 30
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
