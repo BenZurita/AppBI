@@ -73,7 +73,8 @@ const DashboardGrid = {
                                     <td>
                                         <div style="display:flex;align-items:center;gap:0.5rem;">
                                             <span class="period-dot" :style="'background:' + row.color"></span>
-                                            <span :style="row.isTotal ? 'font-weight:700;font-size:1.1rem;' : 'font-weight:600;'">
+                                            <span :style="row.isTotal ? 'font-weight:700;font-size:1.1rem;color:#000000;' : 'font-weight:600;'"
+>
                                                 {{ row.periodo }}
                                             </span>
                                         </div>

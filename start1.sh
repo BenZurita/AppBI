@@ -28,7 +28,7 @@ cd "$DIR"
 # Configuración
 WORKERS="${WORKERS:-4}"
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8000}"
+PORT="${PORT:-8001}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 echo "=== App BI — Starting ==="
