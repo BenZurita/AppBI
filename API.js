@@ -7,7 +7,7 @@ const port = window.location.port;
 
 // Configuración: IP pública de tu servidor (cámbiala cuando tengas dominio)
 const PRODUCTION_IP = '161.97.175.225';
-const PRODUCTION_PORT = '8001';
+const PRODUCTION_PORT = '5000';
 
 let API_BASE_URL;
 
