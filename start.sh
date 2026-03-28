@@ -11,6 +11,9 @@
 #   PORT      — Puerto (default: 8000)
 #   LOG_LEVEL — Nivel de log: debug, info, warning, error (default: info)
 
+export PYTHONPATH="/usr/lib/python3/dist-packages/gunicorn:$PYTHONPATH"
+
+
 set -e
 
 # Directorio del script
